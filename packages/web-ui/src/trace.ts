@@ -123,6 +123,12 @@ export function buildTimeline(trace: Trace): TimelineItem[] {
   }));
 }
 
+export function filterSteps(steps: Step[], query: string): Step[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return steps;
+  return steps.filter((step) => stepSearchText(step).includes(normalized));
+}
+
 export function diffRuns(left: Trace, right: Trace): RunDiff {
   const leftCost = computeCostSummary(left);
   const rightCost = computeCostSummary(right);
@@ -367,6 +373,19 @@ function collectToolMocks(steps: Step[]): ReplayToolMock[] {
       args: step.tool?.args ?? null,
       result: step.tool?.result ?? null,
     }));
+}
+
+function stepSearchText(step: Step): string {
+  return [
+    step.id,
+    step.type,
+    step.name,
+    step.status,
+    step.model,
+    step.tool?.name ?? '',
+    step.error?.type ?? '',
+    step.error?.message ?? '',
+  ].join(' ').toLowerCase();
 }
 
 function sourceSlice(source: Trace, startStepId: string): Step[] {

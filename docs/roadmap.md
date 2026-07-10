@@ -276,3 +276,9 @@
 - Larger trace performance testing.
 - Schema version migration strategy.
 - More robust diff alignment for branching agent graphs.
+- GitHub screenshots/GIFs for the Web UI.
+- PyPI publishing after package-name ownership is finalized.
+- OpenAI streaming event expansion.
+- Anthropic streaming event expansion.
+- OpenAI Agents SDK tracing bridge.
+- Claude Code/Codex trace import or execution bridge.

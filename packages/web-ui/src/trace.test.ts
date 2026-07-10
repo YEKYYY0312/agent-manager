@@ -7,6 +7,7 @@ import {
   compareExperiment,
   computeCostSummary,
   diffRuns,
+  filterSteps,
   listReplayCheckpoints,
   loadTrace,
   loadTraceFromFile,
@@ -156,6 +157,18 @@ test('buildTimeline keeps step order and marks failures', () => {
   assertEqual(timeline.length, 3, 'timeline length');
   assertEqual(timeline[1].kind, 'tool', 'tool kind');
   assertEqual(timeline[1].isFailure, true, 'failure flag');
+});
+
+test('filterSteps matches step name type status tool and error text', () => {
+  const trace = cloneTrace(baseTrace);
+  trace.steps[1].status = 'error';
+  trace.steps[1].error = { type: 'ToolError', message: 'city lookup failed', stack: '' };
+
+  assertEqual(filterSteps(trace.steps, 'weather').length, 1, 'name match');
+  assertEqual(filterSteps(trace.steps, 'tool_call').length, 1, 'type match');
+  assertEqual(filterSteps(trace.steps, 'error').length, 1, 'status match');
+  assertEqual(filterSteps(trace.steps, 'city lookup').length, 1, 'error match');
+  assertEqual(filterSteps(trace.steps, '').length, 3, 'empty query returns all');
 });
 
 test('diffRuns aligns repeated runs by type name and position instead of random ids', () => {

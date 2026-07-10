@@ -10,7 +10,12 @@ import { AnalysisView } from './AnalysisView';
 import { ReplayView } from './ReplayView';
 import { ReplayCompareView } from './ReplayCompareView';
 import { ExperimentView } from './ExperimentView';
-import { appendPersistedImportedTrace, loadPersistedImportedTraces } from './storage';
+import {
+  appendPersistedImportedTrace,
+  loadPersistedImportedTraces,
+  restorePersistedTraceContent,
+  saveImportedTraceContent,
+} from './storage';
 import {
   DEFAULT_TAB,
   TRACE_CATALOG,
@@ -41,6 +46,16 @@ function App() {
   const [importedTraces, setImportedTraces] = useState<TraceOption[]>(persistedImports.options);
   const [importedTraceMap, setImportedTraceMap] = useState<Record<string, Trace>>(persistedImports.traceMap);
   const [dropActive, setDropActive] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const restored = await restorePersistedTraceContent(persistedImports);
+      if (cancelled || Object.keys(restored.traceMap).length === 0) return;
+      setImportedTraceMap(restored.traceMap);
+    })();
+    return () => { cancelled = true; };
+  }, [persistedImports]);
 
   const allOptions = useMemo(
     () => [...TRACE_CATALOG, ...importedTraces],
@@ -80,6 +95,7 @@ function App() {
       const path = `import:${Date.now()}:${file.name}`;
       const option = { path, label: file.name };
       appendPersistedImportedTrace(option, imported);
+      void saveImportedTraceContent(option, imported);
       setImportedTraceMap((prev) => ({ ...prev, [path]: imported }));
       setImportedTraces((prev) => [...prev, option]);
       setTrace(imported);

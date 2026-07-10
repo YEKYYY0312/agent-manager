@@ -3,6 +3,7 @@ import {
   appendPersistedImportedTrace,
   clearPersistedImportedTraces,
   loadPersistedImportedTraces,
+  type TraceContentStore,
 } from './storage.ts';
 
 class MemoryStorage {
@@ -30,6 +31,26 @@ class MemoryStorage {
 
   key(index: number): string | null {
     return [...this.values.keys()][index] ?? null;
+  }
+}
+
+class MemoryTraceContentStore implements TraceContentStore {
+  private values = new Map<string, Trace>();
+
+  load(path: string): Trace | null {
+    return this.values.get(path) ?? null;
+  }
+
+  save(path: string, trace: Trace): void {
+    this.values.set(path, JSON.parse(JSON.stringify(trace)) as Trace);
+  }
+
+  remove(path: string): void {
+    this.values.delete(path);
+  }
+
+  clear(): void {
+    this.values.clear();
   }
 }
 
@@ -74,21 +95,24 @@ test('loadPersistedImportedTraces returns empty state when storage is empty', ()
 
 test('appendPersistedImportedTrace stores imported traces for reload', () => {
   const storage = new MemoryStorage() as Storage;
+  const traceStore = new MemoryTraceContentStore();
 
   appendPersistedImportedTrace(
     { path: 'import:1:demo.trace.json', label: 'demo.trace.json' },
     trace,
     storage,
+    traceStore,
   );
-  const loaded = loadPersistedImportedTraces(storage);
+  const loaded = loadPersistedImportedTraces(storage, traceStore);
 
   assertEqual(loaded.options[0].label, 'demo.trace.json', 'persisted label');
   assertEqual(loaded.options[0].path, 'import:1:demo.trace.json', 'persisted path');
-  assertEqual(loaded.traceMap['import:1:demo.trace.json'], undefined, 'full trace is not persisted');
+  assertEqual(loaded.traceMap['import:1:demo.trace.json']?.run.id, 'persisted-run', 'full trace is restored');
 });
 
-test('appendPersistedImportedTrace does not store sensitive trace payloads', () => {
+test('appendPersistedImportedTrace keeps sensitive payloads out of localStorage', () => {
   const storage = new MemoryStorage() as Storage;
+  const traceStore = new MemoryTraceContentStore();
   const sensitiveTrace: Trace = {
     ...trace,
     run: {
@@ -127,20 +151,25 @@ test('appendPersistedImportedTrace does not store sensitive trace payloads', () 
     { path: 'import:2:sensitive.trace.json', label: 'sensitive.trace.json' },
     sensitiveTrace,
     storage,
+    traceStore,
   );
 
   const raw = storage.getItem('agent-devtools.imported-traces.v2') ?? '';
   assertEqual(raw.includes('sk-live-secret123'), false, 'api key not persisted');
   assertEqual(raw.includes('hunter2'), false, 'password not persisted');
   assertEqual(raw.includes('github_pat_secret'), false, 'token not persisted');
+  const loaded = loadPersistedImportedTraces(storage, traceStore);
+  assertEqual(loaded.traceMap['import:2:sensitive.trace.json']?.steps.length, 1, 'trace content restored from content store');
 });
 
 test('clearPersistedImportedTraces removes saved imports', () => {
   const storage = new MemoryStorage() as Storage;
-  appendPersistedImportedTrace({ path: 'import:1:demo.trace.json', label: 'demo.trace.json' }, trace, storage);
+  const traceStore = new MemoryTraceContentStore();
+  appendPersistedImportedTrace({ path: 'import:1:demo.trace.json', label: 'demo.trace.json' }, trace, storage, traceStore);
 
-  clearPersistedImportedTraces(storage);
-  const loaded = loadPersistedImportedTraces(storage);
+  clearPersistedImportedTraces(storage, traceStore);
+  const loaded = loadPersistedImportedTraces(storage, traceStore);
 
   assertEqual(loaded.options.length, 0, 'cleared option count');
+  assertEqual(traceStore.load('import:1:demo.trace.json'), null, 'cleared trace content');
 });

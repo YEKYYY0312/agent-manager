@@ -1,5 +1,6 @@
+import { useMemo, useState } from 'react';
 import type { Step } from './types';
-import { fmtMs, fmtUsd, stepIcon } from './trace';
+import { filterSteps, fmtMs, fmtUsd, stepIcon } from './trace';
 import { StatusBadge } from './components/StatusBadge';
 
 interface Props {
@@ -9,14 +10,32 @@ interface Props {
 }
 
 export function Timeline({ steps, selectedId, onSelect }: Props) {
+  const [query, setQuery] = useState('');
+  const visibleSteps = useMemo(() => filterSteps(steps, query), [steps, query]);
+
   return (
     <div className="panel timeline-panel">
-      <h2 className="panel-heading">时间线 Timeline</h2>
+      <div className="timeline-header">
+        <h2 className="panel-heading">时间线 Timeline</h2>
+        <span className="timeline-count">{visibleSteps.length}/{steps.length}</span>
+      </div>
+      <input
+        className="timeline-search"
+        type="search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="搜索步骤、类型、状态、错误"
+        aria-label="搜索 Timeline 步骤"
+      />
       {steps.length === 0 && (
         <p className="muted" style={{ fontSize: 11, marginBottom: 8 }}>运行后将在这里展示每个步骤的执行时序。</p>
       )}
+      {steps.length > 0 && visibleSteps.length === 0 && (
+        <p className="muted" style={{ fontSize: 11, marginBottom: 8 }}>没有匹配的步骤。</p>
+      )}
       <div className="step-list">
-        {steps.map((s, i) => {
+        {visibleSteps.map((s) => {
+          const i = steps.indexOf(s);
           const isError = s.status === 'error' || s.status === 'timeout';
           return (
             <button

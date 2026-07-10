@@ -2,6 +2,10 @@
 
 Agent DevTools is a local-first debugger for AI agent runs. It records an agent execution as a structured trace, then lets developers inspect, analyze, compare, and later replay the run.
 
+[![CI](https://github.com/YEKYYY0312/agent-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/YEKYYY0312/agent-manager/actions/workflows/ci.yml)
+
+Agent DevTools is not a hosted observability platform. The useful wedge is smaller: debug one run locally, compare two runs, replay from a checkpoint, and share a sanitized trace without creating a cloud account.
+
 ## What Works Now
 
 - Python SDK for recording runs and steps.
@@ -15,7 +19,7 @@ Agent DevTools is a local-first debugger for AI agent runs. It records an agent 
 - Optional `OpenAIAdapter` for tracing Responses API and Chat Completions calls with token usage mapped into step cost, plus opt-in Responses output item expansion.
 - Optional `AnthropicAdapter` for tracing Claude Messages API calls with token usage mapped into step cost, opt-in content block expansion, and local tool-use loop execution.
 - Adapter replay API for re-running a selected trace step through a real adapter.
-- Web UI workbench with Trace Picker, Timeline, Step Inspector, Analysis, Run Diff, Replay Workbench, Replay Compare, Experiment comparison, Chinese UI text, and browser-side local trace import history.
+- Web UI workbench with Trace Picker, Timeline search/filter, Step Inspector, Analysis, Run Diff, Replay Workbench, Replay Compare, Experiment comparison, Chinese UI text, IndexedDB-backed local imported trace persistence, and browser-side import history.
 
 ## Repository Layout
 
@@ -174,6 +178,7 @@ npm run dev
 ```
 
 Open the local URL printed by Vite. The Web UI loads sample traces from `packages/web-ui/public/traces/`, and it can import local `.trace.json` files from the Trace list.
+Imported trace contents are stored locally in browser IndexedDB so refreshes can reopen previously imported traces. localStorage stores only lightweight import metadata.
 
 ## Verification
 
@@ -200,7 +205,8 @@ npm run build
 - [Product Positioning](docs/positioning.md)
 - [Release Guide](docs/release.md)
 - [Changelog](CHANGELOG.md)
+- [Security Audit Checklist](docs/security-audit-checklist.md)
 
 ## Current Status
 
-This repository is a usable MVP for local-first agent debugging. The core trace contract, SDK, CLI, analysis module, Web UI workbench, Chinese UI labels, browser-side local trace import history, Replay Workbench plan generation, deterministic replay trace generation with editable tool mocks, callable adapter replay from the CLI, CLI/Web original-vs-replay comparison, adapter-based replay API, callable, LangGraph, OpenAI, and Anthropic runtime adapters, LangGraph node-level streaming traces, opt-in OpenAI Responses output item expansion, opt-in Anthropic content block expansion, Anthropic local tool-use loop execution, CLI/Web experiment comparison, CI regression checks, privacy scanning/redaction, local SQLite trace storage, OTLP JSON export and HTTP push, package metadata, and CI workflow are in place. Anthropic streaming expansion, OpenAI Agents/streaming event expansion, and broader framework-specific CLI replay are planned next.
+This repository is a usable MVP for local-first agent debugging. The core trace contract, SDK, CLI, analysis module, Web UI workbench, Chinese UI labels, browser-side imported trace persistence, Replay Workbench plan generation, deterministic replay trace generation with editable tool mocks, callable adapter replay from the CLI, CLI/Web original-vs-replay comparison, adapter-based replay API, callable, LangGraph, OpenAI, and Anthropic runtime adapters, LangGraph node-level streaming traces, opt-in OpenAI Responses output item expansion, opt-in Anthropic content block expansion, Anthropic local tool-use loop execution, CLI/Web experiment comparison, CI regression checks, privacy scanning/redaction, local SQLite trace storage, OTLP JSON export and HTTP push, package metadata, release docs, GitHub templates, and CI workflow are in place. Anthropic streaming expansion, OpenAI Agents/streaming event expansion, and broader framework-specific CLI replay are planned after security audit.
