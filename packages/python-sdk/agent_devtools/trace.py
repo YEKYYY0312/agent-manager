@@ -17,6 +17,7 @@ StepType = Literal["model_call", "tool_call", "retrieval", "memory", "planner", 
 
 SCHEMA_VERSION = "0.1.0"
 DEFAULT_MAX_TRACE_BYTES = 50 * 1024 * 1024
+DEFAULT_MAX_JSON_DEPTH = 120
 
 
 def _utc_now() -> str:
@@ -386,7 +387,9 @@ class Trace:
             if size > limit:
                 raise ValueError(f"Trace file {trace_path} exceeds maximum size of {limit} bytes")
         raw = trace_path.read_text(encoding="utf-8-sig")
-        return cls.from_dict(json.loads(raw))
+        data = json.loads(raw)
+        _validate_json_depth(data, DEFAULT_MAX_JSON_DEPTH)
+        return cls.from_dict(data)
 
 
 def new_run(task: str, labels: dict[str, str] | None = None) -> Trace:
@@ -406,3 +409,14 @@ def _max_trace_bytes(override: int | None) -> int | None:
     except ValueError:
         return DEFAULT_MAX_TRACE_BYTES
     return value if value > 0 else DEFAULT_MAX_TRACE_BYTES
+
+
+def _validate_json_depth(value: Any, max_depth: int, depth: int = 0) -> None:
+    if depth > max_depth:
+        raise ValueError(f"Trace JSON exceeds maximum JSON depth of {max_depth}")
+    if isinstance(value, dict):
+        for child in value.values():
+            _validate_json_depth(child, max_depth, depth + 1)
+    elif isinstance(value, list):
+        for child in value:
+            _validate_json_depth(child, max_depth, depth + 1)

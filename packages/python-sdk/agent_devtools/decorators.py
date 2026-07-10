@@ -212,7 +212,7 @@ _MODEL_RATES: dict[str, tuple[float, float]] = {
     "gpt-4.1": (2.00, 8.00),
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
-    "claude-fable-5": (10.00, 50.00),
+    "claude-opus-5": (10.00, 50.00),
     "claude-opus-4-8": (5.00, 25.00),
     "claude-opus-4-7": (5.00, 25.00),
     "claude-opus-4-6": (5.00, 25.00),

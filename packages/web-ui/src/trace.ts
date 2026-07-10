@@ -24,13 +24,27 @@ const emptyCost: Cost = {
   amount_usd: 0,
 };
 
+const MAX_BROWSER_TRACE_BYTES = 5 * 1024 * 1024;
+const TRACE_FETCH_TIMEOUT_MS = 10_000;
+
 export async function loadTrace(url: string): Promise<Trace> {
-  const res = await fetch(url);
+  const safeUrl = safeTraceUrl(url);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TRACE_FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(safeUrl, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!res.ok) throw new Error(`Failed to load trace: ${res.statusText}`);
   return normalizeTrace(await res.json());
 }
 
 export async function loadTraceFromFile(file: File): Promise<Trace> {
+  if (file.size > MAX_BROWSER_TRACE_BYTES) {
+    throw new Error(`Trace file is too large. Maximum size is ${MAX_BROWSER_TRACE_BYTES} bytes.`);
+  }
   const text = await file.text();
   return normalizeTrace(JSON.parse(text));
 }
@@ -184,9 +198,9 @@ export function buildReplayPlan(trace: Trace, startStepId: string): ReplayPlan {
 export function buildReplayCliCommand(tracePath: string, startStepId: string, runId: string, planPath?: string): string {
   const cliTracePath = tracePathForCli(tracePath, runId);
   if (planPath) {
-    return `py packages\\cli\\agent_devtools_cli\\main.py replay "${cliTracePath}" --plan "${planPath}" --output-dir traces`;
+    return `py packages/cli/agent_devtools_cli/main.py replay ${shellQuote(cliTracePath)} --plan ${shellQuote(planPath)} --output-dir traces`;
   }
-  return `py packages\\cli\\agent_devtools_cli\\main.py replay "${cliTracePath}" --start-step ${startStepId} --output-dir traces`;
+  return `py packages/cli/agent_devtools_cli/main.py replay ${shellQuote(cliTracePath)} --start-step ${shellQuote(startStepId)} --output-dir traces`;
 }
 
 export function buildPortableReplayPlan(plan: ReplayPlan, mockedTools: ReplayToolMock[] = plan.mockedTools) {
@@ -268,16 +282,37 @@ export function totalCost(steps: Trace['steps']): { totalTokens: number; costUsd
 
 function tracePathForCli(tracePath: string, runId: string): string {
   if (tracePath.startsWith('/traces/')) {
-    return `packages\\web-ui\\public\\traces\\${tracePath.slice('/traces/'.length)}`;
+    return `packages/web-ui/public/traces/${safeTraceFileName(tracePath.slice('/traces/'.length))}`;
   }
   if (tracePath.startsWith('import:')) {
     const fileName = tracePath.split(':').at(-1) || `${runId}.trace.json`;
-    return `<path-to-${fileName}>`;
+    return `<path-to-${safeTraceFileName(fileName)}>`;
   }
   if (tracePath.endsWith('.trace.json')) {
-    return tracePath.replaceAll('/', '\\');
+    return tracePath.replaceAll('\\', '/');
   }
-  return `traces\\${runId}.trace.json`;
+  return `traces/${safeTraceFileName(runId)}.trace.json`;
+}
+
+function safeTraceUrl(url: string): string {
+  if (!url.startsWith('/traces/')) {
+    throw new Error('Trace URL is not allowed. Only bundled /traces/*.trace.json files can be fetched.');
+  }
+  if (!url.endsWith('.trace.json') || url.includes('..') || url.includes('\\')) {
+    throw new Error('Trace URL is not allowed. Only bundled /traces/*.trace.json files can be fetched.');
+  }
+  return url;
+}
+
+function safeTraceFileName(value: string): string {
+  const fallback = 'trace.trace.json';
+  const base = value.split(/[\\/]/).at(-1) || fallback;
+  const safe = base.replace(/[^A-Za-z0-9._-]/g, '-').replace(/-+/g, '-');
+  return safe || fallback;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
 export function fmtMs(ms: number | null): string {

@@ -53,7 +53,12 @@ function App() {
   );
 
   const loadWorkspaceTrace = useCallback(async (path: string) => {
-    return importedTraceMap[path] ?? loadTrace(path);
+    const imported = importedTraceMap[path];
+    if (imported) return imported;
+    if (path.startsWith('import:')) {
+      throw new Error('Imported trace content is not persisted. Please import the file again.');
+    }
+    return loadTrace(path);
   }, [importedTraceMap]);
 
   const handlePick = useCallback(async (path: string) => {

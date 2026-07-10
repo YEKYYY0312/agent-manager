@@ -186,7 +186,7 @@ packages/web-ui/public/traces/
 
 In the Web UI, use the Trace list import button to select a local `.trace.json` file. You can also drag a `.trace.json` file onto the Trace list area.
 
-Imported traces are saved in the current browser's local storage and restored after refresh. Clearing site data or switching browsers removes those saved imports.
+Imported trace labels are saved in the current browser's local storage as history, but full trace contents stay in memory to avoid persisting prompts, tool arguments, or secrets in browser storage. After refresh, re-import the file to inspect its contents again. Clearing site data or switching browsers removes the import history.
 
 Invalid JSON or invalid trace-shaped files show an error banner instead of crashing the page.
 

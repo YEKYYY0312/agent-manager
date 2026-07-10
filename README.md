@@ -15,7 +15,7 @@ Agent DevTools is a local-first debugger for AI agent runs. It records an agent 
 - Optional `OpenAIAdapter` for tracing Responses API and Chat Completions calls with token usage mapped into step cost, plus opt-in Responses output item expansion.
 - Optional `AnthropicAdapter` for tracing Claude Messages API calls with token usage mapped into step cost, opt-in content block expansion, and local tool-use loop execution.
 - Adapter replay API for re-running a selected trace step through a real adapter.
-- Web UI workbench with Trace Picker, Timeline, Step Inspector, Analysis, Run Diff, Replay Workbench, Replay Compare, Experiment comparison, Chinese UI text, and persisted browser-side local trace import.
+- Web UI workbench with Trace Picker, Timeline, Step Inspector, Analysis, Run Diff, Replay Workbench, Replay Compare, Experiment comparison, Chinese UI text, and browser-side local trace import history.
 
 ## Repository Layout
 
@@ -176,4 +176,4 @@ npm run build
 
 ## Current Status
 
-This repository is a usable MVP for local-first agent debugging. The core trace contract, SDK, CLI, analysis module, Web UI workbench, Chinese UI labels, persisted browser-side local trace import, Replay Workbench plan generation, deterministic replay trace generation with editable tool mocks, callable adapter replay from the CLI, CLI/Web original-vs-replay comparison, adapter-based replay API, callable, LangGraph, OpenAI, and Anthropic runtime adapters, LangGraph node-level streaming traces, opt-in OpenAI Responses output item expansion, opt-in Anthropic content block expansion, Anthropic local tool-use loop execution, CLI/Web experiment comparison, CI regression checks, privacy scanning/redaction, local SQLite trace storage, OTLP JSON export and HTTP push, package metadata, and CI workflow are in place. Anthropic streaming expansion, OpenAI Agents/streaming event expansion, and broader framework-specific CLI replay are planned next.
+This repository is a usable MVP for local-first agent debugging. The core trace contract, SDK, CLI, analysis module, Web UI workbench, Chinese UI labels, browser-side local trace import history, Replay Workbench plan generation, deterministic replay trace generation with editable tool mocks, callable adapter replay from the CLI, CLI/Web original-vs-replay comparison, adapter-based replay API, callable, LangGraph, OpenAI, and Anthropic runtime adapters, LangGraph node-level streaming traces, opt-in OpenAI Responses output item expansion, opt-in Anthropic content block expansion, Anthropic local tool-use loop execution, CLI/Web experiment comparison, CI regression checks, privacy scanning/redaction, local SQLite trace storage, OTLP JSON export and HTTP push, package metadata, and CI workflow are in place. Anthropic streaming expansion, OpenAI Agents/streaming event expansion, and broader framework-specific CLI replay are planned next.

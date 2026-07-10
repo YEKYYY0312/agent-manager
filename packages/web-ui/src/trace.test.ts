@@ -8,6 +8,8 @@ import {
   computeCostSummary,
   diffRuns,
   listReplayCheckpoints,
+  loadTrace,
+  loadTraceFromFile,
   normalizeTrace,
 } from './trace.ts';
 import type { Trace } from './types.ts';
@@ -120,6 +122,16 @@ function test(name: string, fn: () => void): void {
   }
 }
 
+async function testAsync(name: string, fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+    console.log(`ok ${name}`);
+  } catch (error) {
+    console.error(`not ok ${name}`);
+    throw error;
+  }
+}
+
 test('computeCostSummary uses step costs before run cost fallback', () => {
   const summary = computeCostSummary(baseTrace);
   assertEqual(summary.totalTokens, 456, 'step tokens');
@@ -214,7 +226,7 @@ test('buildReplayCliCommand targets shipped public sample traces', () => {
 
   assertEqual(
     command,
-    'py packages\\cli\\agent_devtools_cli\\main.py replay "packages\\web-ui\\public\\traces\\sample-success.trace.json" --start-step step-plan-a --output-dir traces',
+    "py packages/cli/agent_devtools_cli/main.py replay 'packages/web-ui/public/traces/sample-success.trace.json' --start-step 'step-plan-a' --output-dir traces",
     'sample replay command',
   );
 });
@@ -224,7 +236,7 @@ test('buildReplayCliCommand uses editable placeholder for imported traces', () =
 
   assertEqual(
     command,
-    'py packages\\cli\\agent_devtools_cli\\main.py replay "<path-to-custom.trace.json>" --start-step step-plan-a --output-dir traces',
+    "py packages/cli/agent_devtools_cli/main.py replay '<path-to-custom.trace.json>' --start-step 'step-plan-a' --output-dir traces",
     'import replay command',
   );
 });
@@ -234,8 +246,20 @@ test('buildReplayCliCommand can use a replay plan file', () => {
 
   assertEqual(
     command,
-    'py packages\\cli\\agent_devtools_cli\\main.py replay "packages\\web-ui\\public\\traces\\sample-success.trace.json" --plan "replay-plan.json" --output-dir traces',
+    "py packages/cli/agent_devtools_cli/main.py replay 'packages/web-ui/public/traces/sample-success.trace.json' --plan 'replay-plan.json' --output-dir traces",
     'plan replay command',
+  );
+});
+
+test('buildReplayCliCommand quotes malicious imported filenames safely', () => {
+  const command = buildReplayCliCommand('import:123:a";calc#.trace.json', 'step";calc#', 'run-a', "plan';calc#.json");
+
+  assertEqual(command.includes('"'), false, 'no double quote injection surface');
+  assertEqual(command.includes('";'), false, 'no double quote command break');
+  assertEqual(
+    command,
+    "py packages/cli/agent_devtools_cli/main.py replay '<path-to-a-calc-.trace.json>' --plan 'plan'';calc#.json' --output-dir traces",
+    'malicious filename command',
   );
 });
 
@@ -359,4 +383,37 @@ test('compareReplay reports output drift', () => {
   const report = compareReplay(source, replay);
 
   assertEqual(report.stepChanges.some((change) => change.kind === 'output_changed'), true, 'step output changed');
+});
+
+await testAsync('loadTrace rejects external URLs before fetch', async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = (() => {
+    called = true;
+    throw new Error('fetch should not be called');
+  }) as typeof fetch;
+  try {
+    let message = '';
+    try {
+      await loadTrace('https://evil.example/exfil.trace.json');
+    } catch (error) {
+      message = String((error as Error).message);
+    }
+    assertEqual(called, false, 'external fetch was blocked before network');
+    assertEqual(message.includes('Trace URL is not allowed'), true, 'blocked message');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+await testAsync('loadTraceFromFile rejects oversized trace files', async () => {
+  const file = new File(['x'.repeat(5 * 1024 * 1024 + 1)], 'large.trace.json', { type: 'application/json' });
+  let message = '';
+  try {
+    await loadTraceFromFile(file);
+  } catch (error) {
+    message = String((error as Error).message);
+  }
+
+  assertEqual(message.includes('Trace file is too large'), true, 'oversized import rejected');
 });

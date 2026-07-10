@@ -105,7 +105,7 @@
 
 - Privacy redaction module added.
 - `redact` CLI command added for sanitized trace copies.
-- Browser-imported traces persist across page refresh through local storage.
+- Browser-imported trace history persists across page refresh without storing full trace payloads in local storage.
 - Local SQLite `TraceStore` added.
 - `store import/list/search/show` CLI commands added.
 - Python package metadata and `agent-devtools` console script added.

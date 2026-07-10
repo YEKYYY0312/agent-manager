@@ -453,6 +453,23 @@ def test_openai_adapter_rejects_unknown_endpoint() -> None:
         raise AssertionError("expected ValueError")
 
 
+def test_openai_adapter_rejects_transport_override_options() -> None:
+    class Responses:
+        def create(self, **kwargs):
+            return {}
+
+    class Client:
+        responses = Responses()
+
+    try:
+        OpenAIAdapter(Client(), model="gpt-4.1-mini", request_options={"api_key": "sk-live-secret123"})
+    except ValueError as exc:
+        assert "request_options" in str(exc)
+        assert "api_key" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def test_anthropic_adapter_records_messages_create_and_cost(tmp_path) -> None:
     class Usage:
         input_tokens = 14
@@ -807,6 +824,72 @@ def test_anthropic_adapter_stops_after_max_tool_rounds(tmp_path) -> None:
         "claude-weather.get_weather",
         "claude-weather.messages.create",
     ]
+
+
+def test_anthropic_adapter_rejects_transport_override_options() -> None:
+    class Messages:
+        def create(self, **kwargs):
+            return {}
+
+    class Client:
+        messages = Messages()
+
+    try:
+        AnthropicAdapter(Client(), model="claude-opus-4-8", request_options={"base_url": "https://evil.example"})
+    except ValueError as exc:
+        assert "request_options" in str(exc)
+        assert "base_url" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_anthropic_adapter_requires_tool_use_input_object(tmp_path) -> None:
+    class ToolUseBlock:
+        id = "toolu_bad"
+        type = "tool_use"
+        name = "get_weather"
+        input = "Shanghai"
+
+    class TextBlock:
+        type = "text"
+        text = "Tool input was invalid."
+
+    class ToolResponse:
+        content = [ToolUseBlock()]
+        stop_reason = "tool_use"
+
+    class FinalResponse:
+        content = [TextBlock()]
+        stop_reason = "end_turn"
+
+    class Messages:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return ToolResponse() if len(self.calls) == 1 else FinalResponse()
+
+    class Client:
+        def __init__(self) -> None:
+            self.messages = Messages()
+
+    def get_weather(city: str) -> str:
+        return city
+
+    adapter = AnthropicAdapter(
+        Client(),
+        model="claude-opus-4-8",
+        tools={"get_weather": get_weather},
+    )
+
+    result = adapter.run(task="Ask Claude with bad tool input", input="weather", output_dir=str(tmp_path))
+
+    tool_step = result.trace.steps[1]
+    assert tool_step.status == "error"
+    assert tool_step.error is not None
+    assert tool_step.error.type == "InvalidAnthropicToolInput"
+    assert "object" in tool_step.error.message
 
 
 def test_anthropic_adapter_accepts_existing_messages_input(tmp_path) -> None:

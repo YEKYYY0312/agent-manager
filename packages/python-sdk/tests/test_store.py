@@ -66,6 +66,17 @@ def test_trace_store_imports_trace_file_and_searches() -> None:
     assert rows[0].task == "Refund customer order"
 
 
+def test_trace_store_search_applies_limit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        store = TraceStore(Path(tmp) / "traces.db")
+        for index in range(5):
+            store.upsert_trace(_trace(f"Refund customer order {index}"))
+
+        rows = store.search("Refund", limit=2)
+
+    assert len(rows) == 2
+
+
 def test_trace_store_returns_none_for_missing_run() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         store = TraceStore(Path(tmp) / "traces.db")

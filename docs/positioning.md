@@ -8,7 +8,7 @@ Agent DevTools is a local-first debugging workbench for AI agent development. It
 
 - A local trace recorder for Python agent code.
 - A CLI for inspecting, analyzing, diffing, privacy-scanning, redacting, replaying, experimenting, OTLP-exporting/pushing, and storing traces.
-- A Web UI for timeline inspection, step details, analysis, run diff, replay planning, replay comparison, experiment comparison, and persisted local imports.
+- A Web UI for timeline inspection, step details, analysis, run diff, replay planning, replay comparison, experiment comparison, and local import history.
 - A trace-file-first workflow that works well for Claude Code, Codex, custom scripts, demos, and early agent prototypes.
 
 ## What It Is Not
@@ -35,6 +35,6 @@ This means the product should optimize for:
 
 ## Current Product Boundary
 
-The current product is a complete local MVP. It can record, inspect, analyze, diff, privacy-scan, redact, replay deterministically with optional edited tool mocks, execute explicit CLI callable adapter replay, compare original runs against replay runs, run adapter-based Python callable, LangGraph graph/node-level, OpenAI Responses/Chat, Anthropic Messages, and Anthropic local tool-use-loop replay, compare experiments, persist imported browser traces, index traces in SQLite, export OTLP JSON, and push OTLP HTTP JSON to a Collector endpoint.
+The current product is a complete local MVP. It can record, inspect, analyze, diff, privacy-scan, redact, replay deterministically with optional edited tool mocks, execute explicit CLI callable adapter replay, compare original runs against replay runs, run adapter-based Python callable, LangGraph graph/node-level, OpenAI Responses/Chat, Anthropic Messages, and Anthropic local tool-use-loop replay, compare experiments, keep browser import history without persisting full trace payloads, index traces in SQLite, export OTLP JSON, and push OTLP HTTP JSON to a Collector endpoint.
 
 Deeper framework-specific adapters are the next major boundary. They should remain optional adapters that keep the trace schema stable instead of turning the project into a framework-specific platform.

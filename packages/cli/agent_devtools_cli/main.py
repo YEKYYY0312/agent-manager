@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import base64
 from contextlib import contextmanager
+import hashlib
 import importlib
 import importlib.util
 import json
@@ -561,9 +562,7 @@ def _load_callable(spec: str, pythonpath: list[str] | None = None) -> Callable[[
 
 
 def _unsafe_code_allowed(args: argparse.Namespace) -> bool:
-    if getattr(args, "allow_unsafe_code", False):
-        return True
-    return os.getenv("AGENT_DEVTOOLS_ALLOW_UNSAFE_CODE", "").strip().lower() in {"1", "true", "yes", "on"}
+    return bool(getattr(args, "allow_unsafe_code", False))
 
 
 @contextmanager
@@ -580,7 +579,7 @@ def _extend_pythonpath(paths: list[str] | None) -> None:
     for raw in paths or []:
         for part in raw.split(os.pathsep):
             if part and part not in sys.path:
-                sys.path.insert(0, part)
+                sys.path.append(part)
 
 
 def _load_callable_from_file(path: Path, attr_path: str) -> Callable[[Any], Any]:
@@ -588,7 +587,8 @@ def _load_callable_from_file(path: Path, attr_path: str) -> Callable[[Any], Any]
         raise SystemExit(f"Callable file not found: {path}")
     resolved = path.resolve()
 
-    module_name = f"agent_devtools_runtime_{resolved.stem}_{abs(hash(str(resolved)))}"
+    module_digest = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:16]
+    module_name = f"agent_devtools_runtime_{resolved.stem}_{module_digest}"
     spec = importlib.util.spec_from_file_location(module_name, resolved)
     if spec is None or spec.loader is None:
         raise SystemExit(f"Failed to import callable file: {path}")
@@ -608,7 +608,10 @@ def _load_callable_from_module(module_name: str, attr_path: str) -> Callable[[An
 
 def _resolve_attr(root: Any, attr_path: str) -> Any:
     current = root
-    for part in attr_path.split("."):
+    parts = attr_path.split(".")
+    if len(parts) > 20:
+        raise SystemExit(f"Callable attribute path is too deep: {attr_path}")
+    for part in parts:
         if not part:
             raise SystemExit(f"Invalid callable attribute path: {attr_path}")
         current = getattr(current, part, None)

@@ -315,6 +315,21 @@ class TestTraceWriter:
             with pytest.raises(ValueError, match="exceeds maximum"):
                 Trace.from_file(str(path), max_bytes=5)
 
+    def test_trace_from_file_rejects_deeply_nested_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "deep.trace.json"
+            nested = "[" * 130 + "0" + "]" * 130
+            path.write_text(
+                '{"schema_version":"0.1.0","run":{"id":"r","task":"t","status":"success","started_at":"2026-01-01T00:00:00Z"},"steps":['
+                + '{"id":"s","type":"custom","name":"x","status":"success","started_at":"2026-01-01T00:00:00Z","input":'
+                + nested
+                + "}]}",
+                encoding="utf-8",
+            )
+
+            with pytest.raises(ValueError, match="maximum JSON depth"):
+                Trace.from_file(str(path))
+
     def test_rejects_invalid_run_fields(self) -> None:
         from agent_devtools.writer import _validate_structure
 

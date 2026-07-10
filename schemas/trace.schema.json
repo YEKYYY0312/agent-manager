@@ -5,18 +5,18 @@
   "type": "object",
   "required": ["schema_version", "run", "steps"],
   "properties": {
-    "schema_version": { "type": "string" },
+    "schema_version": { "type": "string", "maxLength": 32 },
     "run": {
       "type": "object",
       "required": ["id", "task", "status", "started_at"],
       "properties": {
-        "id": { "type": "string" },
-        "task": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
+        "task": { "type": "string", "maxLength": 20000 },
         "status": { "$ref": "#/$defs/status" },
         "started_at": { "type": "string", "format": "date-time" },
         "ended_at": { "type": ["string", "null"], "format": "date-time" },
         "duration_ms": { "type": ["number", "null"], "minimum": 0 },
-        "labels": { "type": "object", "additionalProperties": { "type": "string" } },
+        "labels": { "type": "object", "maxProperties": 100, "additionalProperties": { "type": "string", "maxLength": 2000 } },
         "final_output": {},
         "cost": { "$ref": "#/$defs/cost" }
       },
@@ -24,6 +24,7 @@
     },
     "steps": {
       "type": "array",
+      "maxItems": 10000,
       "items": { "$ref": "#/$defs/step" }
     }
   },
@@ -61,8 +62,8 @@
       "required": ["timestamp", "type"],
       "properties": {
         "timestamp": { "type": "string", "format": "date-time" },
-        "type": { "type": "string" },
-        "message": { "type": "string" },
+        "type": { "type": "string", "maxLength": 256 },
+        "message": { "type": "string", "maxLength": 20000 },
         "data": {}
       },
       "additionalProperties": true
@@ -71,21 +72,21 @@
       "type": "object",
       "required": ["id", "type", "name", "status", "started_at"],
       "properties": {
-        "id": { "type": "string" },
-        "parent_id": { "type": ["string", "null"] },
+        "id": { "type": "string", "maxLength": 128 },
+        "parent_id": { "type": ["string", "null"], "maxLength": 128 },
         "type": { "$ref": "#/$defs/step_type" },
-        "name": { "type": "string" },
+        "name": { "type": "string", "maxLength": 1000 },
         "status": { "$ref": "#/$defs/status" },
         "started_at": { "type": "string", "format": "date-time" },
         "ended_at": { "type": ["string", "null"], "format": "date-time" },
         "duration_ms": { "type": ["number", "null"], "minimum": 0 },
-        "model": { "type": "string" },
+        "model": { "type": "string", "maxLength": 256 },
         "input": {},
         "output": {},
         "tool": {
           "type": "object",
           "properties": {
-            "name": { "type": "string" },
+            "name": { "type": "string", "maxLength": 1000 },
             "args": {},
             "result": {}
           },
@@ -95,10 +96,11 @@
         "error": { "$ref": "#/$defs/error" },
         "events": {
           "type": "array",
+          "maxItems": 1000,
           "items": { "$ref": "#/$defs/event" }
         },
         "replayable": { "type": "boolean" },
-        "metadata": { "type": "object", "additionalProperties": true }
+        "metadata": { "type": "object", "maxProperties": 200, "additionalProperties": true }
       },
       "additionalProperties": true
     }

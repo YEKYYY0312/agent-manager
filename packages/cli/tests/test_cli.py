@@ -33,6 +33,7 @@ from agent_devtools_cli.main import (
     command_show,
     command_steps,
     _load_callable,
+    _unsafe_code_allowed,
     main,
 )
 
@@ -620,6 +621,11 @@ class TestReplayCommand:
 
             assert "unsafe code" in str(exc_info.value)
 
+    def test_replay_adapter_ignores_unsafe_environment_variable(self, monkeypatch) -> None:
+        monkeypatch.setenv("AGENT_DEVTOOLS_ALLOW_UNSAFE_CODE", "true")
+
+        assert _unsafe_code_allowed(_arg({"allow_unsafe_code": False})) is False
+
     def test_load_callable_restores_temporary_pythonpath(self) -> None:
         original_path = list(sys.path)
         with tempfile.TemporaryDirectory() as tmp:
@@ -629,6 +635,23 @@ class TestReplayCommand:
             fn = _load_callable("demo_agent:run", [tmp])
 
             assert fn({"ok": True}) == {"ok": True}
+            assert sys.path == original_path
+
+    def test_load_callable_appends_pythonpath_after_standard_paths(self) -> None:
+        original_path = list(sys.path)
+        with tempfile.TemporaryDirectory() as tmp:
+            module_path = Path(tmp) / "shadow_check_agent.py"
+            module_path.write_text(
+                "import json\n"
+                "def run(payload):\n"
+                "    return {'json_module': json.__name__}\n",
+                encoding="utf-8",
+            )
+            (Path(tmp) / "json.py").write_text("raise RuntimeError('shadowed json imported')\n", encoding="utf-8")
+
+            fn = _load_callable("shadow_check_agent:run", [tmp])
+
+            assert fn({}) == {"json_module": "json"}
             assert sys.path == original_path
 
     def test_replay_compare_reports_original_vs_replay(self, capsys) -> None:

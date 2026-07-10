@@ -84,9 +84,10 @@ class TraceStore:
     def import_files(self, paths: Iterable[str | Path]) -> list[str]:
         return [self.import_file(path) for path in paths]
 
-    def list_traces(self, query: str | None = None) -> list[StoredTraceSummary]:
+    def list_traces(self, query: str | None = None, limit: int = 100) -> list[StoredTraceSummary]:
         if query:
-            return self.search(query)
+            return self.search(query, limit=limit)
+        limit = _safe_limit(limit)
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -94,11 +95,14 @@ class TraceStore:
                        total_tokens, cost_usd, source_path
                 FROM traces
                 ORDER BY started_at DESC, run_id DESC
-                """
+                LIMIT ?
+                """,
+                (limit,),
             ).fetchall()
         return [_summary(row) for row in rows]
 
-    def search(self, query: str) -> list[StoredTraceSummary]:
+    def search(self, query: str, limit: int = 100) -> list[StoredTraceSummary]:
+        limit = _safe_limit(limit)
         pattern = f"%{query}%"
         with self._connect() as conn:
             rows = conn.execute(
@@ -111,8 +115,9 @@ class TraceStore:
                    OR status LIKE ?
                    OR source_path LIKE ?
                 ORDER BY started_at DESC, run_id DESC
+                LIMIT ?
                 """,
-                (pattern, pattern, pattern, pattern),
+                (pattern, pattern, pattern, pattern, limit),
             ).fetchall()
         return [_summary(row) for row in rows]
 
@@ -180,6 +185,14 @@ def _summary(row: sqlite3.Row) -> StoredTraceSummary:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _safe_limit(value: int) -> int:
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 100
+    return max(1, min(limit, 1000))
 
 
 def _normalize_redaction(redaction: bool | RedactionConfig | None) -> RedactionConfig | None:

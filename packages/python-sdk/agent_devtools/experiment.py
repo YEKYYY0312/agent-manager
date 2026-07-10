@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Literal
 
 from .trace import Trace
@@ -104,7 +105,7 @@ def _success_winner(left: ExperimentArm, right: ExperimentArm) -> Winner:
 
 
 def _lower_winner(left_value: float, right_value: float) -> Winner:
-    if left_value == right_value:
+    if math.isclose(left_value, right_value, rel_tol=1e-9, abs_tol=1e-12):
         return "tie"
     return "A" if left_value < right_value else "B"
 

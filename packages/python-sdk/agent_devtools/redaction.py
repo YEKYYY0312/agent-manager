@@ -48,8 +48,7 @@ GITHUB_TOKEN_RE = re.compile(r"\bgh[opsru]_[A-Za-z0-9_]{20,}\b")
 SLACK_TOKEN_RE = re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")
 JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
 PRIVATE_KEY_RE = re.compile(
-    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
-    re.DOTALL,
+    r"-----BEGIN [A-Z0-9 ]{0,64}PRIVATE KEY-----[\s\S]{0,20000}?-----END [A-Z0-9 ]{0,64}PRIVATE KEY-----",
 )
 
 SECRET_VALUE_PATTERNS = (

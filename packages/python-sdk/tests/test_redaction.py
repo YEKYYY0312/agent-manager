@@ -148,3 +148,18 @@ def test_scan_trace_reports_common_secret_shapes_without_values() -> None:
     assert aws_key not in rendered
     assert github_token not in rendered
     assert jwt not in rendered
+
+
+def test_private_key_redaction_does_not_cross_unrelated_blocks() -> None:
+    trace = new_run("Secret scan")
+    trace.run.final_output = (
+        "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----\n"
+        "public text\n"
+        "-----BEGIN CERTIFICATE-----\nnot-secret\n-----END CERTIFICATE-----"
+    )
+
+    redacted = redact_trace(trace).run.final_output
+
+    assert "[REDACTED]" in redacted
+    assert "abc123" not in redacted
+    assert "not-secret" in redacted

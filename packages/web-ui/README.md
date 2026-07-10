@@ -39,7 +39,7 @@ Rules:
 - Missing `step.cost` remains `null`.
 - Run diff aligns repeated runs by position plus `type/name`, not random step ids.
 - Experiment comparison follows the CLI rule: success first, then lower cost and lower latency.
-- Imported traces are saved in browser local storage and restored after refresh.
+- Imported trace labels are saved in browser local storage as history; full trace contents stay in memory and must be re-imported after refresh.
 
 ## Commands
 

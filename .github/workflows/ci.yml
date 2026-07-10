@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
   pull_request:
@@ -32,7 +35,9 @@ jobs:
           cache: npm
           cache-dependency-path: packages/web-ui/package-lock.json
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts --registry=https://registry.npmjs.org/
+      - name: Audit dependencies
+        run: npm audit --audit-level=high --registry=https://registry.npmjs.org/
       - name: Run data tests
         run: npm run test:data
       - name: Run lint

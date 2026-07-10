@@ -11,6 +11,20 @@ from .context import TraceContext
 from .decorators import _compute_usd
 from .trace import Cost, Error, ToolCall, Trace
 
+_FORBIDDEN_REQUEST_OPTION_KEYS = {
+    "api_key",
+    "api-key",
+    "apikey",
+    "base_url",
+    "base-url",
+    "base_uri",
+    "base-uri",
+    "organization",
+    "default_headers",
+    "http_client",
+    "timeout",
+}
+
 
 @dataclass
 class AdapterRunResult:
@@ -235,7 +249,7 @@ class OpenAIAdapter:
         self.model = model
         self.name = name
         self.endpoint = endpoint
-        self.request_options = request_options or {}
+        self.request_options = _safe_request_options(request_options)
         self.track_cost = track_cost
         self.expand_output_items = expand_output_items
 
@@ -330,7 +344,7 @@ class AnthropicAdapter:
         self.client = client
         self.model = model
         self.name = name
-        self.request_options = request_options or {}
+        self.request_options = _safe_request_options(request_options)
         self.track_cost = track_cost
         self.expand_content_blocks = expand_content_blocks
         self.tools = dict(tools) if tools is not None else None
@@ -463,6 +477,17 @@ class AnthropicAdapter:
             step.tool = ToolCall(name=tool_name, args=args)
 
             fn = tools.get(tool_name)
+            if not isinstance(args, dict):
+                err = Error(message=f"Anthropic tool input for {tool_name} must be an object", type="InvalidAnthropicToolInput")
+                step.complete(status="error", output=err.message, error=err)
+                step.tool.result = err.message
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": err.message,
+                    "is_error": True,
+                }
+
             if fn is None:
                 err = Error(message=f"Unknown Anthropic tool: {tool_name}", type="UnknownAnthropicTool")
                 step.complete(status="error", output=err.message, error=err)
@@ -507,6 +532,16 @@ def _labels(labels: dict[str, str] | None) -> dict[str, str]:
     if not labels:
         return {}
     return {str(key): str(value) for key, value in labels.items()}
+
+
+def _safe_request_options(options: dict[str, Any] | None) -> dict[str, Any]:
+    if not options:
+        return {}
+    forbidden = sorted(key for key in options if key.lower() in _FORBIDDEN_REQUEST_OPTION_KEYS)
+    if forbidden:
+        joined = ", ".join(forbidden)
+        raise ValueError(f"request_options cannot override transport/client settings: {joined}")
+    return dict(options)
 
 
 def _status_for_exception(exc: Exception) -> str:
@@ -979,9 +1014,9 @@ def _block_to_value(block: Any) -> Any:
 
 
 def _call_anthropic_tool(fn: Callable[..., Any], args: Any) -> Any:
-    if isinstance(args, dict):
-        return fn(**args)
-    return fn(args)
+    if not isinstance(args, dict):
+        raise TypeError("Anthropic tool input must be an object")
+    return fn(**args)
 
 
 def _anthropic_tool_result_content(result: Any) -> str:
@@ -1014,6 +1049,15 @@ def _float_value(obj: Any, key: str) -> float:
 
 
 def _model_dump(obj: Any) -> Any:
+    if isinstance(obj, (dict, list, str, int, float, bool, type(None))):
+        return None
+    module_name = obj.__class__.__module__
+    if not (
+        module_name.startswith("openai")
+        or module_name.startswith("anthropic")
+        or module_name.startswith("pydantic")
+    ):
+        return None
     dump = getattr(obj, "model_dump", None)
     if callable(dump):
         return dump()
