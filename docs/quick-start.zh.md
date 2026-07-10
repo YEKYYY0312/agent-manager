@@ -85,10 +85,10 @@ py packages\cli\agent_devtools_cli\main.py replay traces\<trace-file>.trace.json
 如果你要让真实本地 Python callable 重新执行，用 `replay-adapter`，并显式传入 `--callable`：
 
 ```powershell
-py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace-file>.trace.json --start-step <step-id> --callable path\to\agent.py:run --output-dir traces
+py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace-file>.trace.json --start-step <step-id> --callable path\to\agent.py:run --allow-unsafe-code --output-dir traces
 ```
 
-`--callable` 支持 `module:function` 或 `path\to\file.py:function`。这个命令会执行你的本地 Python 代码，所以只对你信任的文件使用。
+`--callable` 支持 `module:function` 或 `path\to\file.py:function`。这个命令会执行你的本地 Python 代码，所以默认会拒绝运行；只有你确认代码可信时才加 `--allow-unsafe-code`。
 
 生成 replay trace 后，可以自动对比原始运行和 replay 运行：
 
@@ -180,6 +180,8 @@ py packages\cli\agent_devtools_cli\main.py otel-push traces\<trace-file>.trace.j
 ```
 
 如果不传 `--endpoint`，会依次读取 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`、`OTEL_EXPORTER_OTLP_ENDPOINT`，最后默认用 `http://localhost:4318/v1/traces`。
+
+`otel-push` 默认只允许 HTTPS 或本机 loopback HTTP。非本机 HTTP 需要 `--allow-insecure-endpoint`，内网/link-local 等私有地址需要 `--allow-private-endpoint`，只对可信 Collector 使用这些开关。
 
 `privacy-scan` 只报告敏感内容的位置和类型，不会把密钥原文打印出来。`store import`、`otel-export` 和 `otel-push` 默认会先做隐私预检；发现敏感内容时会停止。建议用 `--redact` 写入或推送脱敏版本。只有你明确知道风险并且需要原始 trace 时，才使用 `--allow-sensitive`。
 

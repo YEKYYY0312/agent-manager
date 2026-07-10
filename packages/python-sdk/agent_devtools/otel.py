@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
+import socket
+import ssl
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
@@ -130,6 +133,8 @@ def push_trace_to_otlp_http(
     timeout_seconds: float | None = None,
     service_name: str = DEFAULT_SERVICE_NAME,
     include_payloads: bool = False,
+    allow_private_endpoint: bool = False,
+    allow_insecure_endpoint: bool = False,
 ) -> OtlpHttpExportResult:
     """Push a trace to an OTLP HTTP JSON endpoint.
 
@@ -137,6 +142,11 @@ def push_trace_to_otlp_http(
     HTTP traces endpoint when no endpoint is provided.
     """
     target = _resolve_endpoint(endpoint)
+    _validate_otlp_endpoint(
+        target,
+        allow_private_endpoint=allow_private_endpoint,
+        allow_insecure_endpoint=allow_insecure_endpoint,
+    )
     payload = json.dumps(
         trace_to_otlp_json(trace, service_name=service_name, include_payloads=include_payloads),
         ensure_ascii=False,
@@ -148,9 +158,13 @@ def push_trace_to_otlp_http(
     }
     request = Request(target, data=payload, headers=merged_headers, method="POST")
     timeout = timeout_seconds if timeout_seconds is not None else _env_timeout_seconds()
+    parsed = urlparse(target)
+    open_kwargs: dict[str, Any] = {"timeout": timeout}
+    if parsed.scheme == "https":
+        open_kwargs["context"] = ssl.create_default_context()
 
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with urlopen(request, **open_kwargs) as response:
             body = response.read().decode("utf-8", errors="replace")
             status_code = int(response.status)
     except HTTPError as exc:
@@ -387,6 +401,71 @@ def _append_traces_path(endpoint: str) -> str:
     if parsed.path.endswith("/v1/traces"):
         return endpoint
     return endpoint.rstrip("/") + "/v1/traces"
+
+
+def _validate_otlp_endpoint(
+    endpoint: str,
+    *,
+    allow_private_endpoint: bool,
+    allow_insecure_endpoint: bool,
+) -> None:
+    parsed = urlparse(endpoint)
+    if parsed.scheme not in {"http", "https"}:
+        raise OtlpHttpExportError(endpoint, message="invalid OTLP endpoint scheme; expected http or https")
+    if parsed.username or parsed.password:
+        raise OtlpHttpExportError(endpoint, message="invalid OTLP endpoint; userinfo is not allowed")
+    host = parsed.hostname
+    if not host:
+        raise OtlpHttpExportError(endpoint, message="invalid OTLP endpoint; missing host")
+
+    literal_ip = _parse_ip(host)
+    if literal_ip is not None and _is_blocked_ip(literal_ip) and not allow_private_endpoint:
+        raise OtlpHttpExportError(endpoint, message="private OTLP endpoint blocked; pass allow_private_endpoint to override")
+
+    if parsed.scheme == "http" and not allow_insecure_endpoint and not _is_loopback_host(host):
+        raise OtlpHttpExportError(endpoint, message="insecure OTLP endpoint blocked; use https or loopback http")
+
+    if allow_private_endpoint or _is_loopback_host(host) or literal_ip is not None:
+        return
+
+    for resolved_ip in _resolve_host_ips(host, endpoint):
+        if _is_blocked_ip(resolved_ip):
+            raise OtlpHttpExportError(endpoint, message="private OTLP endpoint blocked; pass allow_private_endpoint to override")
+
+
+def _parse_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        return None
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    ip = _parse_ip(host)
+    return bool(ip and ip.is_loopback)
+
+
+def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if ip.is_loopback:
+        return False
+    return ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+
+
+def _resolve_host_ips(host: str, endpoint: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise OtlpHttpExportError(endpoint, message=f"could not resolve OTLP endpoint host: {host}") from exc
+
+    addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for info in infos:
+        address = info[4][0]
+        parsed = _parse_ip(address)
+        if parsed is not None:
+            addresses.append(parsed)
+    return addresses
 
 
 def _env_headers() -> dict[str, str]:

@@ -124,10 +124,10 @@ The plan's `mocked_tools[].result` values replace the corresponding replayed too
 For real execution replay from local Python code, use `replay-adapter`:
 
 ```powershell
-py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace-file>.trace.json --start-step <step-id> --callable path\to\agent.py:run --output-dir traces
+py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace-file>.trace.json --start-step <step-id> --callable path\to\agent.py:run --allow-unsafe-code --output-dir traces
 ```
 
-The `--callable` value can be `module:function` or `path\to\file.py:function`. This command executes local Python code, so use it only with code you trust. Add `--input-json '{"question":"override"}'` when you want to override the recorded step input.
+The `--callable` value can be `module:function` or `path\to\file.py:function`. This command executes local Python code, so it now refuses to run unless you add `--allow-unsafe-code`. Use it only with code you trust. Add `--input-json '{"question":"override"}'` when you want to override the recorded step input.
 
 Compare the replay trace with the original trace:
 
@@ -271,6 +271,8 @@ py packages\cli\agent_devtools_cli\main.py otel-push traces\<trace>.trace.json -
 ```
 
 If `--endpoint` is omitted, the SDK uses `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, then `OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/traces` appended, then `http://localhost:4318/v1/traces`.
+
+Endpoint safety defaults: HTTPS endpoints are allowed with normal certificate verification, and loopback HTTP collectors such as `http://localhost:4318/v1/traces` are allowed for local development. Non-loopback HTTP requires `--allow-insecure-endpoint`. Private, link-local, multicast, reserved, or unspecified network targets require `--allow-private-endpoint`.
 
 Add Collector headers with either environment variables or CLI flags:
 

@@ -161,7 +161,7 @@
 ### Phase 12.6: Adapter CLI Runtime Replay
 
 - CLI `replay-adapter` command added.
-- Runtime replay remains explicit: local Python code runs only when `--callable` is provided.
+- Runtime replay remains explicit: local Python code runs only when `--callable` and `--allow-unsafe-code` are provided.
 - Callable import paths support `module:function` and `path/to/file.py:function`.
 - `--input-json` can override the selected step input.
 - Adapter replay traces are written to `--output-dir` and preserve source run metadata.

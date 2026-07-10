@@ -98,3 +98,53 @@ def test_trace_writer_redacts_automatically_when_env_enabled(monkeypatch) -> Non
 
     assert data["run"]["labels"]["owner_email"] == "[REDACTED]"
     assert data["steps"][0]["tool"]["args"]["api_key"] == "[REDACTED]"
+
+
+def test_redact_trace_covers_common_cloud_and_repo_secret_shapes() -> None:
+    trace = new_run("Secret scan")
+    aws_key = "AKIA" + "IOSFODNN7EXAMPLE"
+    github_token = "ghp_" + ("x" * 36)
+    slack_token = "xoxb-" + ("1" * 12) + "-" + ("2" * 12) + "-" + ("a" * 24)
+    jwt = "eyJ" + ("a" * 12) + "." + ("b" * 12) + "." + ("c" * 12)
+    private_key = "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----"
+    trace.run.final_output = {
+        "token": "opaque-token",
+        "cookie": "session=secret",
+        "aws": aws_key,
+        "github": github_token,
+        "slack": slack_token,
+        "jwt": jwt,
+        "pem": private_key,
+    }
+
+    redacted = redact_trace(trace).to_dict()
+    rendered = json.dumps(redacted, ensure_ascii=False)
+
+    assert redacted["run"]["final_output"]["token"] == "[REDACTED]"
+    assert redacted["run"]["final_output"]["cookie"] == "[REDACTED]"
+    assert aws_key not in rendered
+    assert github_token not in rendered
+    assert slack_token not in rendered
+    assert jwt not in rendered
+    assert private_key not in rendered
+
+
+def test_scan_trace_reports_common_secret_shapes_without_values() -> None:
+    trace = new_run("Secret scan")
+    aws_key = "AKIA" + "IOSFODNN7EXAMPLE"
+    github_token = "ghp_" + ("x" * 36)
+    jwt = "eyJ" + ("a" * 12) + "." + ("b" * 12) + "." + ("c" * 12)
+    trace.run.final_output = {
+        "aws": aws_key,
+        "github": github_token,
+        "jwt": jwt,
+    }
+
+    findings = scan_trace_for_secrets(trace)
+    kinds = {finding.kind for finding in findings}
+    rendered = json.dumps([finding.to_dict() for finding in findings])
+
+    assert {"aws_access_key", "github_token", "jwt"} <= kinds
+    assert aws_key not in rendered
+    assert github_token not in rendered
+    assert jwt not in rendered

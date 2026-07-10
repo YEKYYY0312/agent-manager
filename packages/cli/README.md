@@ -18,7 +18,7 @@ py packages\cli\agent_devtools_cli\main.py experiment traces\<left>.trace.json t
 py packages\cli\agent_devtools_cli\main.py regression-check traces\<baseline>.trace.json traces\<candidate>.trace.json --max-token-delta 100 --max-latency-delta-ms 500 --json
 py packages\cli\agent_devtools_cli\main.py replay traces\<trace>.trace.json --start-step <step-id>
 py packages\cli\agent_devtools_cli\main.py replay traces\<trace>.trace.json --plan replay-plan.json --output-dir traces
-py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace>.trace.json --start-step <step-id> --callable path\to\agent.py:run
+py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace>.trace.json --start-step <step-id> --callable path\to\agent.py:run --allow-unsafe-code
 py packages\cli\agent_devtools_cli\main.py replay-compare traces\<source>.trace.json traces\<replay>.trace.json
 py packages\cli\agent_devtools_cli\main.py privacy-scan traces\<trace>.trace.json
 py packages\cli\agent_devtools_cli\main.py redact traces\<trace>.trace.json --output traces\<trace>.safe.trace.json
@@ -28,6 +28,8 @@ py packages\cli\agent_devtools_cli\main.py store search "weather"
 py packages\cli\agent_devtools_cli\main.py otel-export traces\<trace>.trace.json --redact --output traces\<trace>.otlp.json
 py packages\cli\agent_devtools_cli\main.py otel-push traces\<trace>.trace.json --redact --endpoint http://localhost:4318/v1/traces
 ```
+
+`replay-adapter` executes local Python code and therefore requires `--allow-unsafe-code`. `otel-push` blocks non-loopback HTTP and private/link-local endpoints by default; use the explicit override flags only for trusted collectors.
 
 ## Generate Demo Traces
 

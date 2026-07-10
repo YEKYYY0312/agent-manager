@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,8 +28,9 @@ class TraceWriter:
     """
 
     def __init__(self, output_dir: str = "traces", redaction: bool | RedactionConfig | None = None) -> None:
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        self.output_dir = output_path.resolve()
         self.redaction = _normalize_redaction(redaction)
 
     def write(self, trace: Trace, filename: str | None = None) -> Path:
@@ -37,8 +39,8 @@ class TraceWriter:
         If *filename* is omitted it is derived from the run id.
         """
         if filename is None:
-            filename = f"{trace.run.id}.trace.json"
-        path = self.output_dir / filename
+            filename = _safe_trace_filename(trace.run.id)
+        path = _resolve_output_file(self.output_dir, filename)
 
         data = self._to_serializable(trace)
         _validate_structure(data)
@@ -51,9 +53,9 @@ class TraceWriter:
     def write_atomic(self, trace: Trace, filename: str | None = None) -> Path:
         """Same as :meth:`write` but writes to a temp file first, then renames."""
         if filename is None:
-            filename = f"{trace.run.id}.trace.json"
-        final_path = self.output_dir / filename
-        tmp_path = final_path.with_suffix(".tmp")
+            filename = _safe_trace_filename(trace.run.id)
+        final_path = _resolve_output_file(self.output_dir, filename)
+        tmp_path = final_path.with_name(f"{final_path.name}.tmp")
 
         data = self._to_serializable(trace)
         _validate_structure(data)
@@ -83,6 +85,22 @@ def _normalize_redaction(redaction: bool | RedactionConfig | None) -> RedactionC
 
 def _env_redaction_enabled() -> bool:
     return os.getenv("AGENT_DEVTOOLS_REDACT_ON_WRITE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _safe_trace_filename(run_id: str) -> str:
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(run_id))
+    safe_id = re.sub(r"\.{2,}", "_", safe_id).strip("._-")
+    return f"{safe_id or 'trace'}.trace.json"
+
+
+def _resolve_output_file(output_dir: Path, filename: str) -> Path:
+    candidate = Path(filename)
+    if candidate.is_absolute() or len(candidate.parts) != 1:
+        raise ValueError("Trace filename must resolve inside output_dir")
+    final_path = (output_dir / candidate.name).resolve()
+    if final_path.parent != output_dir:
+        raise ValueError("Trace filename must resolve inside output_dir")
+    return final_path
 
 
 def _validate_structure(data: dict) -> None:

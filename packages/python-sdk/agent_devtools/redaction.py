@@ -17,23 +17,50 @@ REDACTED = "[REDACTED]"
 DEFAULT_SENSITIVE_KEYS = frozenset(
     {
         "apikey",
+        "auth",
         "authorization",
         "accesstoken",
         "refreshtoken",
         "idtoken",
+        "token",
+        "bearertoken",
+        "jwt",
         "password",
         "passwd",
         "secret",
+        "credential",
+        "credentials",
         "clientsecret",
         "privatekey",
         "accesskey",
         "sessionid",
+        "sessiontoken",
+        "cookie",
+        "setcookie",
     }
 )
 
 EMAIL_RE = re.compile(r"[\w.!#$%&'*+/=?^`{|}~-]+@[\w.-]+\.[A-Za-z]{2,}")
 KEY_RE = re.compile(r"\b(?:sk|pk|ak)-[A-Za-z0-9_-]{8,}\b")
-BEARER_RE = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+\b", re.IGNORECASE)
+AUTH_HEADER_RE = re.compile(r"\b(?:Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]+\b", re.IGNORECASE)
+AWS_ACCESS_KEY_RE = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
+GITHUB_TOKEN_RE = re.compile(r"\bgh[opsru]_[A-Za-z0-9_]{20,}\b")
+SLACK_TOKEN_RE = re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")
+JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
+PRIVATE_KEY_RE = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+    re.DOTALL,
+)
+
+SECRET_VALUE_PATTERNS = (
+    ("api_key_like", KEY_RE),
+    ("bearer_token", AUTH_HEADER_RE),
+    ("aws_access_key", AWS_ACCESS_KEY_RE),
+    ("github_token", GITHUB_TOKEN_RE),
+    ("slack_token", SLACK_TOKEN_RE),
+    ("jwt", JWT_RE),
+    ("private_key", PRIVATE_KEY_RE),
+)
 
 
 @dataclass(frozen=True)
@@ -160,8 +187,8 @@ def _redact_string(value: str, config: RedactionConfig) -> str:
     if config.redact_emails:
         redacted = EMAIL_RE.sub(config.replacement, redacted)
     if config.redact_api_key_like_values:
-        redacted = KEY_RE.sub(config.replacement, redacted)
-        redacted = BEARER_RE.sub(config.replacement, redacted)
+        for _, pattern in SECRET_VALUE_PATTERNS:
+            redacted = pattern.sub(config.replacement, redacted)
     return redacted
 
 
@@ -170,10 +197,9 @@ def _scan_string(value: str, config: RedactionConfig, path: str) -> list[SecretF
     if config.redact_emails and EMAIL_RE.search(value):
         findings.append(SecretFinding(path=path, kind="email"))
     if config.redact_api_key_like_values:
-        if KEY_RE.search(value):
-            findings.append(SecretFinding(path=path, kind="api_key_like"))
-        if BEARER_RE.search(value):
-            findings.append(SecretFinding(path=path, kind="bearer_token"))
+        for kind, pattern in SECRET_VALUE_PATTERNS:
+            if pattern.search(value):
+                findings.append(SecretFinding(path=path, kind=kind))
     return findings
 
 

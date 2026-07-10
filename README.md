@@ -72,7 +72,7 @@ py packages\cli\agent_devtools_cli\main.py replay traces\<trace-file>.trace.json
 Execute an explicit local Python callable from a recorded step:
 
 ```powershell
-py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace-file>.trace.json --start-step <step-id> --callable path\to\agent.py:run --output-dir traces
+py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace-file>.trace.json --start-step <step-id> --callable path\to\agent.py:run --allow-unsafe-code --output-dir traces
 ```
 
 Compare an original trace with a replay trace:
@@ -132,6 +132,8 @@ py packages\cli\agent_devtools_cli\main.py otel-push traces\<trace-file>.trace.j
 ```
 
 By default `store import`, `otel-export`, and `otel-push` run a privacy preflight and stop when sensitive values are detected. Use `--redact` to sanitize before writing or pushing, or `--allow-sensitive` only when you explicitly want to continue with the original trace. OTLP export/push also omits step input/output and tool args/results unless `--include-payloads` is provided.
+
+Security defaults: `replay-adapter` refuses to execute local Python callables unless `--allow-unsafe-code` is provided. `otel-push` allows HTTPS and loopback HTTP by default; non-loopback HTTP and private/link-local endpoints require explicit `--allow-insecure-endpoint` and/or `--allow-private-endpoint`.
 
 Set this environment variable to make SDK writes redact automatically:
 

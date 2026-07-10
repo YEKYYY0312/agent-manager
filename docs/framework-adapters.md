@@ -227,10 +227,10 @@ If no explicit replay input is provided, Agent DevTools uses the selected step's
 The CLI exposes explicit callable adapter replay with `replay-adapter`:
 
 ```powershell
-py packages\cli\agent_devtools_cli\main.py replay-adapter traces\source.trace.json --start-step <step-id> --callable path\to\agent.py:run --output-dir traces
+py packages\cli\agent_devtools_cli\main.py replay-adapter traces\source.trace.json --start-step <step-id> --callable path\to\agent.py:run --allow-unsafe-code --output-dir traces
 ```
 
-This command executes local Python code only after `--callable` is provided. The callable path can be `module:function` or `path\to\file.py:function`. Use `--input-json '{"question":"override"}'` to override the recorded step input.
+This command executes local Python code only after `--callable` and `--allow-unsafe-code` are provided. The callable path can be `module:function` or `path\to\file.py:function`. Use `--input-json '{"question":"override"}'` to override the recorded step input.
 
 After creating a replay trace, compare it against the source trace:
 

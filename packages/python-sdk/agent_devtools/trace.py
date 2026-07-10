@@ -6,6 +6,7 @@ with to_dict()/from_dict() for JSON round-tripping.
 
 from __future__ import annotations
 
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ Status = Literal["success", "error", "cancelled", "timeout"]
 StepType = Literal["model_call", "tool_call", "retrieval", "memory", "planner", "control", "custom"]
 
 SCHEMA_VERSION = "0.1.0"
+DEFAULT_MAX_TRACE_BYTES = 50 * 1024 * 1024
 
 
 def _utc_now() -> str:
@@ -22,7 +24,7 @@ def _utc_now() -> str:
 
 
 def _new_id() -> str:
-    return uuid.uuid4().hex[:12]
+    return uuid.uuid4().hex
 
 
 # ---------------------------------------------------------------------------
@@ -373,11 +375,17 @@ class Trace:
         )
 
     @classmethod
-    def from_file(cls, path: str) -> Trace:
+    def from_file(cls, path: str, *, max_bytes: int | None = None) -> Trace:
         import json
         from pathlib import Path
 
-        raw = Path(path).read_text(encoding="utf-8-sig")
+        trace_path = Path(path)
+        limit = _max_trace_bytes(max_bytes)
+        if limit is not None:
+            size = trace_path.stat().st_size
+            if size > limit:
+                raise ValueError(f"Trace file {trace_path} exceeds maximum size of {limit} bytes")
+        raw = trace_path.read_text(encoding="utf-8-sig")
         return cls.from_dict(json.loads(raw))
 
 
@@ -385,3 +393,16 @@ def new_run(task: str, labels: dict[str, str] | None = None) -> Trace:
     """Create a new trace with a fresh run, ready to record steps."""
     run = Run(task=task, labels=labels or {})
     return Trace(run=run)
+
+
+def _max_trace_bytes(override: int | None) -> int | None:
+    if override is not None:
+        return override
+    raw = os.getenv("AGENT_DEVTOOLS_MAX_TRACE_BYTES", "").strip()
+    if not raw:
+        return DEFAULT_MAX_TRACE_BYTES
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_TRACE_BYTES
+    return value if value > 0 else DEFAULT_MAX_TRACE_BYTES

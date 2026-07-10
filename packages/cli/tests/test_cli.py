@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -30,6 +31,7 @@ from agent_devtools_cli.main import (
     command_replay_compare,
     command_show,
     command_steps,
+    _load_callable,
     main,
 )
 
@@ -486,6 +488,7 @@ class TestReplayCommand:
                 "input_json": None,
                 "pythonpath": None,
                 "output_dir": str(out_dir),
+                "allow_unsafe_code": True,
                 "func": command_replay_adapter,
             })
             rc = command_replay_adapter(args)
@@ -523,6 +526,7 @@ class TestReplayCommand:
                 trace.steps[0].id,
                 "--callable",
                 f"{module_path}:run",
+                "--allow-unsafe-code",
                 "--input-json",
                 '{"question":"override"}',
                 "--output-dir",
@@ -548,11 +552,47 @@ class TestReplayCommand:
                 "input_json": None,
                 "pythonpath": None,
                 "output_dir": tmp,
+                "allow_unsafe_code": True,
                 "func": command_replay_adapter,
             })
 
             with pytest.raises(SystemExit):
                 command_replay_adapter(args)
+
+    def test_replay_adapter_requires_explicit_unsafe_code_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = _make_success_trace()
+            path = _write_trace(tmp, trace)
+            module_path = Path(tmp) / "demo_agent.py"
+            module_path.write_text("def run(payload):\n    return payload\n", encoding="utf-8")
+
+            args = _arg({
+                "trace": str(path),
+                "start_step": trace.steps[0].id,
+                "callable": f"{module_path}:run",
+                "name": None,
+                "input_json": None,
+                "pythonpath": None,
+                "output_dir": tmp,
+                "allow_unsafe_code": False,
+                "func": command_replay_adapter,
+            })
+
+            with pytest.raises(SystemExit) as exc_info:
+                command_replay_adapter(args)
+
+            assert "unsafe code" in str(exc_info.value)
+
+    def test_load_callable_restores_temporary_pythonpath(self) -> None:
+        original_path = list(sys.path)
+        with tempfile.TemporaryDirectory() as tmp:
+            module_path = Path(tmp) / "demo_agent.py"
+            module_path.write_text("def run(payload):\n    return payload\n", encoding="utf-8")
+
+            fn = _load_callable("demo_agent:run", [tmp])
+
+            assert fn({"ok": True}) == {"ok": True}
+            assert sys.path == original_path
 
     def test_replay_compare_reports_original_vs_replay(self, capsys) -> None:
         with tempfile.TemporaryDirectory() as tmp:

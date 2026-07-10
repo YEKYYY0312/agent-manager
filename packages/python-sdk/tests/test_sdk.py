@@ -261,6 +261,13 @@ class TestTrace:
 
 
 class TestTraceWriter:
+    def test_new_ids_use_full_uuid_entropy(self) -> None:
+        trace = new_run("test")
+        step = Step(type="planner", name="plan")
+
+        assert len(trace.run.id) == 32
+        assert len(step.id) == 32
+
     def test_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             w = TraceWriter(tmp)
@@ -271,6 +278,25 @@ class TestTraceWriter:
             assert data["schema_version"] == "0.1.0"
             assert data["run"]["task"] == "test"
 
+    def test_write_sanitizes_default_filename_from_run_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            w = TraceWriter(tmp)
+            t = new_run("test")
+            t.run.id = "../escape"
+
+            path = w.write(t)
+
+            assert path.parent.resolve() == Path(tmp).resolve()
+            assert path.name == "escape.trace.json"
+            assert path.exists()
+
+    def test_write_rejects_filename_path_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            w = TraceWriter(tmp)
+
+            with pytest.raises(ValueError, match="inside output_dir"):
+                w.write(new_run("test"), filename="../escape.trace.json")
+
     def test_write_atomic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             w = TraceWriter(tmp)
@@ -280,6 +306,14 @@ class TestTraceWriter:
             # No .tmp file left behind
             tmps = list(Path(tmp).glob("*.tmp"))
             assert len(tmps) == 0
+
+    def test_trace_from_file_rejects_oversized_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "large.trace.json"
+            path.write_text('{"run":{},"steps":[]}', encoding="utf-8")
+
+            with pytest.raises(ValueError, match="exceeds maximum"):
+                Trace.from_file(str(path), max_bytes=5)
 
     def test_rejects_invalid_run_fields(self) -> None:
         from agent_devtools.writer import _validate_structure

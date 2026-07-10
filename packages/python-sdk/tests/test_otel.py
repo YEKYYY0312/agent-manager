@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
@@ -246,3 +247,80 @@ def test_push_trace_to_otlp_http_raises_for_non_2xx() -> None:
 
     assert exc_info.value.status_code == 503
     assert "collector down" in exc_info.value.response_body
+
+
+def test_push_trace_to_otlp_http_rejects_non_loopback_http_endpoint() -> None:
+    with pytest.raises(OtlpHttpExportError, match="insecure"):
+        push_trace_to_otlp_http(_make_trace(), endpoint="http://example.com/v1/traces", timeout_seconds=2)
+
+
+def test_push_trace_to_otlp_http_rejects_private_network_endpoint() -> None:
+    with pytest.raises(OtlpHttpExportError, match="private"):
+        push_trace_to_otlp_http(_make_trace(), endpoint="http://169.254.169.254/latest", timeout_seconds=2)
+
+
+def test_push_trace_to_otlp_http_can_allow_private_network_endpoint(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"{}"
+
+    def fake_urlopen(request, timeout=None, context=None):
+        captured["url"] = request.full_url
+        captured["context"] = context
+        return _FakeResponse()
+
+    monkeypatch.setattr("agent_devtools.otel.urlopen", fake_urlopen)
+
+    result = push_trace_to_otlp_http(
+        _make_trace(),
+        endpoint="http://169.254.169.254/v1/traces",
+        allow_private_endpoint=True,
+        allow_insecure_endpoint=True,
+    )
+
+    assert result.ok is True
+    assert captured["url"] == "http://169.254.169.254/v1/traces"
+    assert captured["context"] is None
+
+
+def test_push_trace_to_otlp_http_uses_explicit_tls_context(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"{}"
+
+    def fake_urlopen(request, timeout=None, context=None):
+        captured["url"] = request.full_url
+        captured["context"] = context
+        return _FakeResponse()
+
+    monkeypatch.setattr("agent_devtools.otel.urlopen", fake_urlopen)
+
+    result = push_trace_to_otlp_http(
+        _make_trace(),
+        endpoint="https://localhost:4318/v1/traces",
+        timeout_seconds=2,
+    )
+
+    assert result.ok is True
+    assert captured["url"] == "https://localhost:4318/v1/traces"
+    assert isinstance(captured["context"], ssl.SSLContext)

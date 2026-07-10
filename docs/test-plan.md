@@ -17,7 +17,7 @@ This test plan defines the minimum checks before considering a phase complete.
 | CLI regression check | `py packages\cli\agent_devtools_cli\main.py regression-check traces\<baseline>.trace.json traces\<candidate>.trace.json --max-token-delta 100` | Verifies CI gates can fail on status, failed-step, token, cost, latency, step-count, or output regressions. |
 | CLI replay | `py packages\cli\agent_devtools_cli\main.py replay traces\<trace>.trace.json --start-step <step-id>` | Verifies deterministic replay trace generation works. |
 | CLI replay plan | `py packages\cli\agent_devtools_cli\main.py replay traces\<trace>.trace.json --plan replay-plan.json --output-dir traces` | Verifies deterministic replay applies edited tool mocks from Replay Plan JSON. |
-| CLI adapter replay | `py -m pytest packages\cli\tests\test_cli.py` | Verifies explicit local callable replay through `replay-adapter`, including file callables and input override. |
+| CLI adapter replay | `py -m pytest packages\cli\tests\test_cli.py` | Verifies explicit local callable replay through `replay-adapter`, including unsafe-code opt-in, file callables, temporary pythonpath, and input override. |
 | CLI replay comparison | `py packages\cli\agent_devtools_cli\main.py replay-compare traces\<source>.trace.json traces\<replay>.trace.json` | Verifies original-vs-replay status, output, step, token, cost, and latency comparison. |
 | SDK adapter replay | `py -m pytest packages\python-sdk\tests\test_adapters.py packages\python-sdk\tests\test_replay.py` | Verifies callable adapter execution, LangGraph invoke/stream execution, OpenAI Responses/Chat execution, OpenAI Responses output item expansion, Anthropic Messages execution, Anthropic content block expansion, and adapter replay metadata. |
 | CLI privacy scan | `py packages\cli\agent_devtools_cli\main.py privacy-scan traces\<trace>.trace.json` | Verifies sensitive values are reported by location without printing raw secrets. |
@@ -71,7 +71,7 @@ py packages\cli\agent_devtools_cli\main.py replay traces\<trace>.trace.json --pl
 To verify real local callable replay, run the CLI test coverage or execute:
 
 ```powershell
-py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace>.trace.json --start-step <step-id> --callable path\to\agent.py:run --output-dir traces
+py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace>.trace.json --start-step <step-id> --callable path\to\agent.py:run --allow-unsafe-code --output-dir traces
 ```
 
 Then compare the source trace and replay trace:
@@ -164,7 +164,7 @@ Phase work is complete only when:
 ## Known Gaps To Track
 
 - CLI `replay` execution is deterministic and does not call real framework agents.
-- CLI `replay-adapter` can execute explicit local Python callables, but framework-specific CLI replay is not implemented yet.
+- CLI `replay-adapter` can execute explicit local Python callables after `--allow-unsafe-code`, but framework-specific CLI replay is not implemented yet.
 - Runtime adapter replay exists for Python callables, LangGraph `invoke` and node-level `stream` updates, OpenAI Responses/Chat calls, OpenAI Responses output item expansion, Anthropic Messages calls, and Anthropic content block expansion; Claude Code and Codex adapters are not implemented.
 - OpenTelemetry OTLP JSON file export and OTLP HTTP push exist; Collector availability is environment-dependent.
 - Hosted storage and multi-user features are not implemented.

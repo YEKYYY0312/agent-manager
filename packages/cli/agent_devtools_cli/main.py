@@ -10,6 +10,7 @@ Usage::
     py packages/cli/agent_devtools_cli/main.py diff traces/a.trace.json traces/b.trace.json
     py packages/cli/agent_devtools_cli/main.py experiment traces/a.trace.json traces/b.trace.json
     py packages/cli/agent_devtools_cli/main.py replay traces/run.trace.json --start-step <step-id>
+    py packages/cli/agent_devtools_cli/main.py replay-adapter traces/run.trace.json --start-step <step-id> --callable path/to/agent.py:run --allow-unsafe-code
     py packages/cli/agent_devtools_cli/main.py replay-compare traces/source.trace.json traces/replay.trace.json
     py packages/cli/agent_devtools_cli/main.py regression-check traces/baseline.trace.json traces/candidate.trace.json --max-token-delta 100
     py packages/cli/agent_devtools_cli/main.py redact traces/run.trace.json --output traces/run.safe.trace.json
@@ -22,6 +23,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import importlib
 import importlib.util
 import json
@@ -32,8 +34,8 @@ from typing import Any, Callable
 
 # Ensure sibling python-sdk is importable
 _sdk = Path(__file__).resolve().parents[2] / "python-sdk"
-if str(_sdk) not in sys.path:
-    sys.path.insert(0, str(_sdk))
+if importlib.util.find_spec("agent_devtools") is None and str(_sdk) not in sys.path:
+    sys.path.append(str(_sdk))
 
 from agent_devtools import (
     CallableAgentAdapter,
@@ -433,6 +435,9 @@ def command_replay(args: argparse.Namespace) -> int:
 
 
 def command_replay_adapter(args: argparse.Namespace) -> int:
+    if not _unsafe_code_allowed(args):
+        raise SystemExit("replay-adapter executes unsafe code from --callable. Re-run with --allow-unsafe-code only for code you trust.")
+
     source = _load(args.trace)
     callable_fn = _load_callable(args.callable, args.pythonpath)
     adapter = CallableAgentAdapter(callable_fn, name=args.name)
@@ -473,17 +478,32 @@ def _load_callable(spec: str, pythonpath: list[str] | None = None) -> Callable[[
     if not target or not attr_path:
         raise SystemExit("Callable must be in the form module:function or path/to/file.py:function")
 
-    _extend_pythonpath(pythonpath)
-
-    target_path = Path(target)
-    if target_path.suffix == ".py" or target_path.exists():
-        obj = _load_callable_from_file(target_path, attr_path)
-    else:
-        obj = _load_callable_from_module(target, attr_path)
+    with _temporary_pythonpath(pythonpath):
+        target_path = Path(target)
+        if target_path.suffix == ".py" or target_path.exists():
+            obj = _load_callable_from_file(target_path, attr_path)
+        else:
+            obj = _load_callable_from_module(target, attr_path)
 
     if not callable(obj):
         raise SystemExit(f"Imported object is not callable: {spec}")
     return obj
+
+
+def _unsafe_code_allowed(args: argparse.Namespace) -> bool:
+    if getattr(args, "allow_unsafe_code", False):
+        return True
+    return os.getenv("AGENT_DEVTOOLS_ALLOW_UNSAFE_CODE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@contextmanager
+def _temporary_pythonpath(paths: list[str] | None):
+    original = list(sys.path)
+    try:
+        _extend_pythonpath(paths)
+        yield
+    finally:
+        sys.path[:] = original
 
 
 def _extend_pythonpath(paths: list[str] | None) -> None:
@@ -497,16 +517,14 @@ def _load_callable_from_file(path: Path, attr_path: str) -> Callable[[Any], Any]
     if not path.exists():
         raise SystemExit(f"Callable file not found: {path}")
     resolved = path.resolve()
-    parent = str(resolved.parent)
-    if parent not in sys.path:
-        sys.path.insert(0, parent)
 
     module_name = f"agent_devtools_runtime_{resolved.stem}_{abs(hash(str(resolved)))}"
     spec = importlib.util.spec_from_file_location(module_name, resolved)
     if spec is None or spec.loader is None:
         raise SystemExit(f"Failed to import callable file: {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with _temporary_pythonpath([str(resolved.parent)]):
+        spec.loader.exec_module(module)
     return _resolve_attr(module, attr_path)
 
 
@@ -760,6 +778,8 @@ def command_otel_push(args: argparse.Namespace) -> int:
         timeout_seconds=args.timeout,
         service_name=args.service_name,
         include_payloads=args.include_payloads,
+        allow_private_endpoint=args.allow_private_endpoint,
+        allow_insecure_endpoint=args.allow_insecure_endpoint,
     )
     print(f"OpenTelemetry trace pushed: {result.endpoint} ({result.status_code})")
     return 0
@@ -955,6 +975,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_replay_adapter.add_argument("--name", default=None, help="Adapter name shown in the replay trace")
     p_replay_adapter.add_argument("--input-json", help="Override replay input with JSON instead of the selected step input")
     p_replay_adapter.add_argument("--pythonpath", action="append", help="Extra import path for module:function callables")
+    p_replay_adapter.add_argument("--allow-unsafe-code", action="store_true", help="Allow execution of local Python code from --callable")
     p_replay_adapter.add_argument("--output-dir", default="traces", help="Directory for the adapter replay trace")
     p_replay_adapter.set_defaults(func=command_replay_adapter)
 
@@ -996,6 +1017,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_otel_push.add_argument("--include-payloads", action="store_true", help="Include step input/output and tool args/result JSON attributes")
     p_otel_push.add_argument("--redact", action="store_true", help="Redact sensitive values before pushing")
     p_otel_push.add_argument("--allow-sensitive", action="store_true", help="Push even when privacy-scan finds sensitive values")
+    p_otel_push.add_argument("--allow-private-endpoint", action="store_true", help="Allow pushing to non-loopback private/link-local endpoints")
+    p_otel_push.add_argument("--allow-insecure-endpoint", action="store_true", help="Allow non-loopback http endpoints")
     p_otel_push.set_defaults(func=command_otel_push)
 
     # store
