@@ -23,6 +23,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+dev = ["pytest>=8,<9"]
 postgres = ["psycopg[binary]>=3.2,<4"]
 
 [project.urls]
