@@ -3,8 +3,18 @@ import type { TraceOption } from './workspace';
 
 const IMPORT_STORAGE_KEY = 'agent-devtools.imported-traces.v2';
 const TRACE_DB_NAME = 'agent-devtools-traces';
-const TRACE_DB_VERSION = 1;
+const TRACE_DB_VERSION = 2;
 const TRACE_STORE_NAME = 'imported-traces';
+const TRACE_KEY_STORE_NAME = 'crypto-keys';
+const TRACE_CONTENT_KEY_ID = 'trace-content-key';
+
+interface EncryptedTraceEnvelope {
+  encrypted: true;
+  version: 1;
+  algorithm: 'AES-GCM';
+  iv: string;
+  ciphertext: string;
+}
 
 interface PersistedTraceEntry {
   option: TraceOption;
@@ -125,17 +135,31 @@ export async function saveImportedTraceContent(
 
 export function browserTraceContentStore(): AsyncTraceContentStore | null {
   if (typeof indexedDB === 'undefined') return null;
+  if (!globalThis.crypto?.subtle) return null;
   return {
     async load(path: string) {
       const db = await openTraceDb();
-      return requestResult<Trace | undefined>(db.transaction(TRACE_STORE_NAME, 'readonly').objectStore(TRACE_STORE_NAME).get(path))
-        .then((trace) => trace ?? null)
-        .finally(() => db.close());
+      try {
+        const stored = await requestResult<Trace | EncryptedTraceEnvelope | undefined>(
+          db.transaction(TRACE_STORE_NAME, 'readonly').objectStore(TRACE_STORE_NAME).get(path),
+        );
+        if (!stored) return null;
+        if (isEncryptedTraceEnvelope(stored)) {
+          return decryptTraceForStorage(stored, await traceContentKey(db));
+        }
+        return stored;
+      } finally {
+        db.close();
+      }
     },
     async save(path: string, trace: Trace) {
       const db = await openTraceDb();
-      await requestResult(db.transaction(TRACE_STORE_NAME, 'readwrite').objectStore(TRACE_STORE_NAME).put(trace, path))
-        .finally(() => db.close());
+      try {
+        const encrypted = await encryptTraceForStorage(trace, await traceContentKey(db));
+        await requestResult(db.transaction(TRACE_STORE_NAME, 'readwrite').objectStore(TRACE_STORE_NAME).put(encrypted, path));
+      } finally {
+        db.close();
+      }
     },
     async remove(path: string) {
       const db = await openTraceDb();
@@ -148,6 +172,34 @@ export function browserTraceContentStore(): AsyncTraceContentStore | null {
         .finally(() => db.close());
     },
   };
+}
+
+export async function encryptTraceForStorage(trace: Trace, key: CryptoKey): Promise<EncryptedTraceEnvelope> {
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const plaintext = new TextEncoder().encode(JSON.stringify(trace));
+  const ciphertext = await globalThis.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: bytesToArrayBuffer(iv) },
+    key,
+    bytesToArrayBuffer(plaintext),
+  );
+  return {
+    encrypted: true,
+    version: 1,
+    algorithm: 'AES-GCM',
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
+  };
+}
+
+export async function decryptTraceForStorage(envelope: EncryptedTraceEnvelope, key: CryptoKey): Promise<Trace> {
+  const iv = base64ToBytes(envelope.iv);
+  const ciphertext = base64ToBytes(envelope.ciphertext);
+  const plaintext = await globalThis.crypto.subtle.decrypt(
+    { name: envelope.algorithm, iv: bytesToArrayBuffer(iv) },
+    key,
+    bytesToArrayBuffer(ciphertext),
+  );
+  return JSON.parse(new TextDecoder().decode(plaintext)) as Trace;
 }
 
 function browserStorage(): Storage | null {
@@ -173,6 +225,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isEncryptedTraceEnvelope(value: unknown): value is EncryptedTraceEnvelope {
+  return isRecord(value)
+    && value.encrypted === true
+    && value.version === 1
+    && value.algorithm === 'AES-GCM'
+    && typeof value.iv === 'string'
+    && typeof value.ciphertext === 'string';
+}
+
 function sanitizeOption(option: TraceOption): TraceOption {
   return {
     path: option.path,
@@ -188,10 +249,48 @@ function openTraceDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(TRACE_STORE_NAME)) {
         db.createObjectStore(TRACE_STORE_NAME);
       }
+      if (!db.objectStoreNames.contains(TRACE_KEY_STORE_NAME)) {
+        db.createObjectStore(TRACE_KEY_STORE_NAME);
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error('Failed to open trace content database'));
   });
+}
+
+async function traceContentKey(db: IDBDatabase): Promise<CryptoKey> {
+  const existing = await requestResult<CryptoKey | undefined>(
+    db.transaction(TRACE_KEY_STORE_NAME, 'readonly').objectStore(TRACE_KEY_STORE_NAME).get(TRACE_CONTENT_KEY_ID),
+  );
+  if (existing) return existing;
+
+  const key = await globalThis.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  await requestResult(db.transaction(TRACE_KEY_STORE_NAME, 'readwrite').objectStore(TRACE_KEY_STORE_NAME).put(key, TRACE_CONTENT_KEY_ID));
+  return key;
+}
+
+function bytesToBase64(value: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < value.length; index += chunkSize) {
+    binary += String.fromCharCode(...value.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function bytesToArrayBuffer(value: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(value.byteLength);
+  copy.set(value);
+  return copy.buffer;
 }
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {

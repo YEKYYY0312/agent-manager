@@ -9,6 +9,7 @@ import os
 import re
 import socket
 import ssl
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
@@ -155,7 +156,7 @@ def push_trace_to_otlp_http(
     HTTP traces endpoint when no endpoint is provided.
     """
     target = _resolve_endpoint(endpoint)
-    _validate_otlp_endpoint(
+    pinned_ips = _validate_otlp_endpoint(
         target,
         allow_private_endpoint=allow_private_endpoint,
         allow_insecure_endpoint=allow_insecure_endpoint,
@@ -177,7 +178,9 @@ def push_trace_to_otlp_http(
         open_kwargs["context"] = ssl.create_default_context()
 
     try:
-        with urlopen(request, **open_kwargs) as response:
+        with _pinned_dns_resolution(parsed.hostname or "", pinned_ips):
+            response = urlopen(request, **open_kwargs)
+        with response:
             body = response.read().decode("utf-8", errors="replace")
             status_code = int(response.status)
     except HTTPError as exc:
@@ -421,7 +424,7 @@ def _validate_otlp_endpoint(
     *,
     allow_private_endpoint: bool,
     allow_insecure_endpoint: bool,
-) -> None:
+) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     parsed = urlparse(endpoint)
     if parsed.scheme not in {"http", "https"}:
         raise OtlpHttpExportError(endpoint, message="invalid OTLP endpoint scheme; expected http or https")
@@ -439,11 +442,13 @@ def _validate_otlp_endpoint(
         raise OtlpHttpExportError(endpoint, message="insecure OTLP endpoint blocked; use https or loopback http")
 
     if allow_private_endpoint or _is_loopback_host(host) or literal_ip is not None:
-        return
+        return []
 
-    for resolved_ip in _resolve_host_ips(host, endpoint):
+    resolved_ips = _resolve_host_ips(host, endpoint)
+    for resolved_ip in resolved_ips:
         if _is_blocked_ip(resolved_ip):
             raise OtlpHttpExportError(endpoint, message="private OTLP endpoint blocked; pass allow_private_endpoint to override")
+    return resolved_ips
 
 
 def _parse_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
@@ -479,6 +484,37 @@ def _resolve_host_ips(host: str, endpoint: str) -> list[ipaddress.IPv4Address | 
         if parsed is not None:
             addresses.append(parsed)
     return addresses
+
+
+@contextmanager
+def _pinned_dns_resolution(host: str, addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address]):
+    if not host or not addresses:
+        yield
+        return
+
+    original_getaddrinfo = socket.getaddrinfo
+    pinned_host = host.rstrip(".").lower()
+
+    def pinned_getaddrinfo(query_host, port, family=0, type=0, proto=0, flags=0):
+        query_name = str(query_host).rstrip(".").lower()
+        if query_name != pinned_host:
+            return original_getaddrinfo(query_host, port, family, type, proto, flags)
+
+        results = []
+        socktype = type or socket.SOCK_STREAM
+        for address in addresses:
+            address_family = socket.AF_INET6 if address.version == 6 else socket.AF_INET
+            if family not in (0, address_family):
+                continue
+            sockaddr = (str(address), port, 0, 0) if address.version == 6 else (str(address), port)
+            results.append((address_family, socktype, proto, "", sockaddr))
+        return results or original_getaddrinfo(query_host, port, family, type, proto, flags)
+
+    socket.getaddrinfo = pinned_getaddrinfo
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = original_getaddrinfo
 
 
 def _env_headers() -> dict[str, str]:

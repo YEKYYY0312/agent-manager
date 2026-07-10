@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import ssl
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
@@ -312,6 +314,44 @@ def test_push_trace_to_otlp_http_can_allow_private_network_endpoint(monkeypatch)
     assert result.ok is True
     assert captured["url"] == "http://169.254.169.254/v1/traces"
     assert captured["context"] is None
+
+
+def test_push_trace_to_otlp_http_pins_validated_dns_resolution(monkeypatch) -> None:
+    validated_ip = ipaddress.ip_address("93.184.216.34")
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"{}"
+
+    def fake_resolve(host, endpoint):
+        assert host == "collector.example"
+        return [validated_ip]
+
+    def fake_urlopen(request, timeout=None, context=None):
+        infos = socket.getaddrinfo("collector.example", 443, type=socket.SOCK_STREAM)
+        captured["resolved_addresses"] = [info[4][0] for info in infos]
+        return _FakeResponse()
+
+    monkeypatch.setattr("agent_devtools.otel._resolve_host_ips", fake_resolve)
+    monkeypatch.setattr("agent_devtools.otel.urlopen", fake_urlopen)
+
+    result = push_trace_to_otlp_http(
+        _make_trace(),
+        endpoint="https://collector.example/v1/traces",
+        timeout_seconds=2,
+    )
+
+    assert result.ok is True
+    assert captured["resolved_addresses"] == ["93.184.216.34"]
 
 
 def test_push_trace_to_otlp_http_uses_explicit_tls_context(monkeypatch) -> None:

@@ -178,7 +178,7 @@ npm run dev
 ```
 
 Open the local URL printed by Vite. The Web UI loads sample traces from `packages/web-ui/public/traces/`, and it can import local `.trace.json` files from the Trace list.
-Imported trace contents are stored locally in browser IndexedDB so refreshes can reopen previously imported traces. localStorage stores only lightweight import metadata.
+Imported trace contents are encrypted with browser Web Crypto AES-GCM before they are stored in IndexedDB, so refreshes can reopen previously imported traces without keeping trace JSON plaintext in browser storage. localStorage stores only lightweight import metadata.
 
 ## Verification
 

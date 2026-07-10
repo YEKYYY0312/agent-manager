@@ -2,6 +2,8 @@ import type { Trace } from './types.ts';
 import {
   appendPersistedImportedTrace,
   clearPersistedImportedTraces,
+  decryptTraceForStorage,
+  encryptTraceForStorage,
   loadPersistedImportedTraces,
   type TraceContentStore,
 } from './storage.ts';
@@ -79,6 +81,16 @@ function assertEqual(actual: unknown, expected: unknown, label: string): void {
 function test(name: string, fn: () => void): void {
   try {
     fn();
+    console.log(`ok ${name}`);
+  } catch (error) {
+    console.error(`not ok ${name}`);
+    throw error;
+  }
+}
+
+async function testAsync(name: string, fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
     console.log(`ok ${name}`);
   } catch (error) {
     console.error(`not ok ${name}`);
@@ -172,4 +184,25 @@ test('clearPersistedImportedTraces removes saved imports', () => {
 
   assertEqual(loaded.options.length, 0, 'cleared option count');
   assertEqual(traceStore.load('import:1:demo.trace.json'), null, 'cleared trace content');
+});
+
+await testAsync('trace storage encryption roundtrips without plaintext payload', async () => {
+  const sensitiveTrace: Trace = {
+    ...trace,
+    run: {
+      ...trace.run,
+      task: 'Use API key',
+      final_output: { token: 'sk-live-secret123' },
+    },
+  };
+  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+
+  const encrypted = await encryptTraceForStorage(sensitiveTrace, key);
+  const rendered = JSON.stringify(encrypted);
+  const decrypted = await decryptTraceForStorage(encrypted, key);
+  const finalOutput = decrypted.run.final_output as Record<string, string>;
+
+  assertEqual(rendered.includes('sk-live-secret123'), false, 'ciphertext hides token');
+  assertEqual(rendered.includes('Use API key'), false, 'ciphertext hides task');
+  assertEqual(finalOutput.token, 'sk-live-secret123', 'trace decrypts');
 });
