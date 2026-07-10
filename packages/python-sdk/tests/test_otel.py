@@ -263,6 +263,21 @@ def test_push_trace_to_otlp_http_filters_dangerous_headers(monkeypatch) -> None:
     assert "Transfer-Encoding" not in request_headers
 
 
+def test_push_trace_to_otlp_http_keeps_json_content_type(monkeypatch) -> None:
+    with _CaptureServer() as server:
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_HEADERS", "Content-Type=text/plain")
+
+        result = push_trace_to_otlp_http(
+            _make_trace(),
+            endpoint=server.url,
+            headers={"content-type": "application/octet-stream"},
+            timeout_seconds=2,
+        )
+
+    assert result.ok is True
+    assert server.requests[0]["headers"]["Content-Type"] == "application/json"
+
+
 def test_push_trace_to_otlp_http_raises_for_non_2xx() -> None:
     with _CaptureServer(status_code=503, response_body=b"collector down") as server:
         with pytest.raises(OtlpHttpExportError) as exc_info:

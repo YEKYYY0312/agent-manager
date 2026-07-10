@@ -27,6 +27,7 @@ HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
 DANGEROUS_HTTP_HEADERS = {
     "connection",
     "content-length",
+    "content-type",
     "expect",
     "host",
     "proxy-authorization",
@@ -165,11 +166,13 @@ def push_trace_to_otlp_http(
         trace_to_otlp_json(trace, service_name=service_name, include_payloads=include_payloads),
         ensure_ascii=False,
     ).encode("utf-8")
-    merged_headers = _safe_http_headers({
+    merged_headers = {
         "Content-Type": "application/json",
-        **_env_headers(),
-        **(headers or {}),
-    })
+        **_safe_http_headers({
+            **_env_headers(),
+            **(headers or {}),
+        }),
+    }
     request = Request(target, data=payload, headers=merged_headers, method="POST")
     timeout = timeout_seconds if timeout_seconds is not None else _env_timeout_seconds()
     parsed = urlparse(target)
