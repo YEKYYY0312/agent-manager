@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -21,6 +21,12 @@ classifiers = [
   "Topic :: Software Development :: Debuggers",
 ]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/YEKYYY0312/agent-manager"
+Repository = "https://github.com/YEKYYY0312/agent-manager"
+Issues = "https://github.com/YEKYYY0312/agent-manager/issues"
+Documentation = "https://github.com/YEKYYY0312/agent-manager/tree/main/docs"
 
 [project.scripts]
 agent-devtools = "agent_devtools_cli.main:main"

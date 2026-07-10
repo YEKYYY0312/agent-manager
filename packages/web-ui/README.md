@@ -2,6 +2,16 @@
 
 React + TypeScript + Vite workbench for visual trace inspection.
 
+## Start Locally
+
+```powershell
+cd packages\web-ui
+npm install
+npm run dev
+```
+
+Open the local URL printed by Vite, usually `http://127.0.0.1:5173/`.
+
 ## Views
 
 - Trace Picker
@@ -44,6 +54,7 @@ Rules:
 ## Commands
 
 ```powershell
+npm install
 npm run test:data
 npm run lint
 npm run build
@@ -51,6 +62,16 @@ npm run dev
 ```
 
 `test:data` uses Node's built-in TypeScript stripping, so it does not add a test framework dependency.
+
+For CI or release checks, prefer:
+
+```powershell
+npm ci --ignore-scripts --registry=https://registry.npmjs.org/
+npm audit --audit-level=high --registry=https://registry.npmjs.org/
+npm run test:data
+npm run lint
+npm run build
+```
 
 ## Sample Traces
 
