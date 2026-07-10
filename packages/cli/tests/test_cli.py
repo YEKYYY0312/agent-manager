@@ -1058,6 +1058,59 @@ class TestStoreCommand:
             assert data["run"]["task"] == "Email [REDACTED] with [REDACTED]"
             assert data["steps"][0]["input"]["api_key"] == "[REDACTED]"
 
+    def test_store_import_directory_is_not_recursive_by_default(self, capsys) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "traces.db"
+            source = Path(tmp) / "traces"
+            nested = source / "nested"
+            nested.mkdir(parents=True)
+            top_trace = _make_success_trace()
+            nested_trace = new_run("Nested task")
+            _write_trace(str(source), top_trace, "top.trace.json")
+            _write_trace(str(nested), nested_trace, "nested.trace.json")
+
+            rc = main(["store", "import", str(source), "--db", str(db)])
+
+            assert rc == 0
+            capsys.readouterr()
+            rc = main(["store", "list", "--db", str(db)])
+            assert rc == 0
+            out = capsys.readouterr().out
+            assert top_trace.run.id in out
+            assert nested_trace.run.id not in out
+
+    def test_store_import_directory_can_be_recursive(self, capsys) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "traces.db"
+            source = Path(tmp) / "traces"
+            nested = source / "nested"
+            nested.mkdir(parents=True)
+            top_trace = _make_success_trace()
+            nested_trace = new_run("Nested task")
+            _write_trace(str(source), top_trace, "top.trace.json")
+            _write_trace(str(nested), nested_trace, "nested.trace.json")
+
+            rc = main(["store", "import", str(source), "--db", str(db), "--recursive"])
+
+            assert rc == 0
+            capsys.readouterr()
+            rc = main(["store", "list", "--db", str(db)])
+            assert rc == 0
+            out = capsys.readouterr().out
+            assert top_trace.run.id in out
+            assert nested_trace.run.id in out
+
+    def test_store_import_rejects_too_many_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "traces.db"
+            source = Path(tmp) / "traces"
+            source.mkdir()
+            _write_trace(str(source), _make_success_trace(), "a.trace.json")
+            _write_trace(str(source), _make_success_trace(), "b.trace.json")
+
+            with pytest.raises(SystemExit, match="too many trace files"):
+                main(["store", "import", str(source), "--db", str(db), "--max-files", "1"])
+
 
 # ---------------------------------------------------------------------------
 # main entry point

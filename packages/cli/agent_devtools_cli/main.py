@@ -864,7 +864,7 @@ def command_otel_push(args: argparse.Namespace) -> int:
 
 
 def command_store_import(args: argparse.Namespace) -> int:
-    paths = _collect_trace_files(args.path)
+    paths = _collect_trace_files(args.path, recursive=args.recursive, max_files=args.max_files)
     _preflight_sensitive_files(paths, args, "store")
     store = TraceStore(args.db, redaction=args.redact)
     run_ids = store.import_files(paths)
@@ -895,13 +895,21 @@ def command_store_show(args: argparse.Namespace) -> int:
     return 0
 
 
-def _collect_trace_files(path_str: str) -> list[Path]:
+def _collect_trace_files(path_str: str, *, recursive: bool = False, max_files: int = 1000) -> list[Path]:
     path = Path(path_str)
     if path.is_file():
-        return [path]
-    if path.is_dir():
-        return sorted(path.rglob("*.trace.json"))
-    raise SystemExit(f"Trace path not found: {path}")
+        paths = [path]
+    elif path.is_dir():
+        iterator = path.rglob("*.trace.json") if recursive else path.glob("*.trace.json")
+        paths = sorted(iterator)
+    else:
+        raise SystemExit(f"Trace path not found: {path}")
+
+    if max_files <= 0:
+        raise SystemExit("--max-files must be greater than 0")
+    if len(paths) > max_files:
+        raise SystemExit(f"Refusing to import too many trace files ({len(paths)} > {max_files})")
+    return paths
 
 
 def _print_store_rows(rows) -> None:
@@ -1103,6 +1111,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_store_import.add_argument("--db", default=".agent-devtools/traces.db", help="SQLite database path")
     p_store_import.add_argument("--redact", action="store_true", help="Redact sensitive values before storing")
     p_store_import.add_argument("--allow-sensitive", action="store_true", help="Store even when privacy-scan finds sensitive values")
+    p_store_import.add_argument("--recursive", action="store_true", help="Recursively scan directories for .trace.json files")
+    p_store_import.add_argument("--max-files", type=int, default=1000, help="Maximum trace files to import from a path")
     p_store_import.set_defaults(func=command_store_import)
 
     p_store_list = store_subparsers.add_parser("list", help="List traces in SQLite")

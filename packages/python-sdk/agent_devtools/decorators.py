@@ -26,6 +26,7 @@ import time
 from typing import Any, Callable
 
 from .context import current_trace
+from .redaction import redact_value
 from .trace import Cost, Error as TraceError, Step, StepType, ToolCall
 
 
@@ -179,24 +180,25 @@ def _serialize_input(args: tuple, kwargs: dict) -> Any:
     """Build a display-friendly input from positional and keyword args."""
     if not kwargs and len(args) == 1:
         val = args[0]
-        return val if isinstance(val, (str, dict, list, int, float, bool, type(None))) else str(val)
+        serialized = val if isinstance(val, (str, dict, list, int, float, bool, type(None))) else str(val)
+        return redact_value(serialized)
     parts: dict[str, Any] = {}
     if args:
-        parts["args"] = list(args)
+        parts["args"] = [_safe(arg) for arg in args]
     if kwargs:
         parts["kwargs"] = {k: _safe(v) for k, v in kwargs.items()}
-    return parts if parts else ""
+    return redact_value(parts) if parts else ""
 
 
 def _serialize_output(result: Any) -> Any:
     """Best-effort output serialization."""
     if isinstance(result, (str, dict, list, int, float, bool, type(None))):
-        return result
+        return redact_value(result)
     if hasattr(result, "model_dump"):
-        return result.model_dump()
+        return redact_value(result.model_dump())
     if hasattr(result, "__dict__"):
-        return str(result)
-    return str(result)
+        return redact_value(str(result))
+    return redact_value(str(result))
 
 
 def _safe(val: Any) -> Any:

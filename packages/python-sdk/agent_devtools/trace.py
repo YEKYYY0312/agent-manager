@@ -7,6 +7,7 @@ with to_dict()/from_dict() for JSON round-tripping.
 from __future__ import annotations
 
 import os
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ StepType = Literal["model_call", "tool_call", "retrieval", "memory", "planner", 
 SCHEMA_VERSION = "0.1.0"
 DEFAULT_MAX_TRACE_BYTES = 50 * 1024 * 1024
 DEFAULT_MAX_JSON_DEPTH = 120
+DEFAULT_MAX_STEP_EVENTS = 1000
 
 
 def _utc_now() -> str:
@@ -39,6 +41,12 @@ class Cost:
     output_tokens: int = 0
     total_tokens: int = 0
     amount_usd: float = 0.0
+
+    def __post_init__(self) -> None:
+        self.input_tokens = _validate_non_negative_int("input_tokens", self.input_tokens)
+        self.output_tokens = _validate_non_negative_int("output_tokens", self.output_tokens)
+        self.total_tokens = _validate_non_negative_int("total_tokens", self.total_tokens)
+        self.amount_usd = _validate_non_negative_float("amount_usd", self.amount_usd)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -85,14 +93,14 @@ class Error:
         )
 
     @classmethod
-    def from_exc(cls, exc: BaseException | None = None) -> Error:
+    def from_exc(cls, exc: BaseException | None = None, *, include_stack: bool = False) -> Error:
         import traceback as tb
 
         exc = exc or Exception("unknown error")
         return cls(
             type=type(exc).__name__,
             message=str(exc) or type(exc).__name__,
-            stack="".join(tb.format_exception(exc)),
+            stack="".join(tb.format_exception(exc)) if include_stack else "",
         )
 
 
@@ -170,6 +178,10 @@ class Step:
     replayable: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if len(self.events) > _max_step_events():
+            raise ValueError(f"Step exceeds maximum event count of {_max_step_events()}")
+
     def complete(
         self,
         status: Status = "success",
@@ -195,6 +207,8 @@ class Step:
         return self
 
     def add_event(self, type: str, message: str = "", data: Any = None) -> Event:
+        if len(self.events) >= _max_step_events():
+            raise ValueError(f"Step exceeds maximum event count of {_max_step_events()}")
         evt = Event(timestamp=_utc_now(), type=type, message=message, data=data)
         self.events.append(evt)
         return evt
@@ -409,6 +423,43 @@ def _max_trace_bytes(override: int | None) -> int | None:
     except ValueError:
         return DEFAULT_MAX_TRACE_BYTES
     return value if value > 0 else DEFAULT_MAX_TRACE_BYTES
+
+
+def _max_step_events() -> int:
+    raw = os.getenv("AGENT_DEVTOOLS_MAX_STEP_EVENTS", "").strip()
+    if not raw:
+        return DEFAULT_MAX_STEP_EVENTS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_STEP_EVENTS
+    return value if value > 0 else DEFAULT_MAX_STEP_EVENTS
+
+
+def _validate_non_negative_int(name: str, value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a non-negative integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative integer") from exc
+    if parsed < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return parsed
+
+
+def _validate_non_negative_float(name: str, value: Any) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite non-negative number")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite non-negative number") from exc
+    if not math.isfinite(parsed):
+        raise ValueError(f"{name} must be finite")
+    if parsed < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return parsed
 
 
 def _validate_json_depth(value: Any, max_depth: int, depth: int = 0) -> None:

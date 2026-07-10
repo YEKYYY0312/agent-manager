@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 from pathlib import Path
 
@@ -49,6 +50,15 @@ class TestCost:
     def test_from_none(self) -> None:
         assert Cost.from_dict(None) == Cost()
 
+    def test_rejects_negative_amount(self) -> None:
+        with pytest.raises(ValueError, match="amount_usd"):
+            Cost(amount_usd=-999)
+
+    def test_rejects_nan_or_infinite_amount(self) -> None:
+        for value in [math.nan, math.inf, -math.inf]:
+            with pytest.raises(ValueError, match="amount_usd"):
+                Cost(amount_usd=value)
+
 
 # ---------------------------------------------------------------------------
 # Error
@@ -72,6 +82,15 @@ class TestError:
             raise ValueError("test")
         except ValueError as exc:
             e = Error.from_exc(exc)
+        assert e.type == "ValueError"
+        assert e.message == "test"
+        assert e.stack == ""
+
+    def test_from_exc_can_include_stack_when_requested(self) -> None:
+        try:
+            raise ValueError("test")
+        except ValueError as exc:
+            e = Error.from_exc(exc, include_stack=True)
         assert e.type == "ValueError"
         assert e.message == "test"
         assert "ValueError" in e.stack
@@ -146,6 +165,20 @@ class TestStep:
         s.add_event("log", "done")
         assert len(s.events) == 2
         assert s.events[0].type == "log"
+
+    def test_event_count_is_bounded(self) -> None:
+        s = Step(type="model_call", name="llm")
+        for i in range(1000):
+            s.add_event("log", str(i))
+
+        with pytest.raises(ValueError, match="maximum event count"):
+            s.add_event("log", "too many")
+
+    def test_constructor_rejects_too_many_events(self) -> None:
+        events = [Event(timestamp="2026-01-01T00:00:00Z", type="log") for _ in range(1001)]
+
+        with pytest.raises(ValueError, match="maximum event count"):
+            Step(type="model_call", name="llm", events=events)
 
     def test_replayable_default(self) -> None:
         s = Step(type="model_call", name="llm")
@@ -296,6 +329,76 @@ class TestTraceWriter:
 
             with pytest.raises(ValueError, match="inside output_dir"):
                 w.write(new_run("test"), filename="../escape.trace.json")
+
+    def test_write_accepts_simple_filename_with_unresolved_output_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_dir = Path("traces")
+            cwd = Path.cwd()
+            try:
+                import os
+
+                os.chdir(root)
+                w = TraceWriter(str(output_dir))
+                path = w.write(new_run("test"), filename="ok.trace.json")
+            finally:
+                os.chdir(cwd)
+
+            assert path == (root / "traces" / "ok.trace.json").resolve()
+            assert path.exists()
+
+    def test_write_rejects_windows_reserved_device_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            w = TraceWriter(tmp)
+
+            with pytest.raises(ValueError, match="reserved device name"):
+                w.write(new_run("test"), filename="CON.trace.json")
+
+    def test_write_rejects_non_finite_cost_before_json_hits_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            w = TraceWriter(tmp)
+            t = new_run("test")
+            t.add_step(Step(type="model_call", name="llm", cost=Cost()))
+            t.steps[0].cost.amount_usd = math.nan
+
+            with pytest.raises(ValueError, match="finite"):
+                w.write(t)
+
+            assert not list(Path(tmp).glob("*.trace.json"))
+
+    def test_write_rejects_mutated_negative_cost_before_json_hits_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            w = TraceWriter(tmp)
+            t = new_run("test")
+            t.add_step(Step(type="model_call", name="llm", cost=Cost()))
+            t.steps[0].cost.amount_usd = -999
+
+            with pytest.raises(ValueError, match="amount_usd"):
+                w.write(t)
+
+            assert not list(Path(tmp).glob("*.trace.json"))
+
+    def test_write_rejects_orphan_parent_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            w = TraceWriter(tmp)
+            t = new_run("test")
+            t.add_step(Step(type="tool_call", name="child", parent_id="missing-parent"))
+
+            with pytest.raises(ValueError, match="unknown parent_id"):
+                w.write(t)
+
+    def test_write_rejects_too_many_events_from_raw_trace_data(self) -> None:
+        from agent_devtools.writer import _validate_structure
+
+        events = [{"timestamp": "2026-01-01T00:00:00Z", "type": "log"} for _ in range(1001)]
+
+        with pytest.raises(ValueError, match="maximum event count"):
+            _validate_structure(
+                {
+                    "run": {"id": "x", "task": "t", "status": "success", "started_at": "now"},
+                    "steps": [{"id": "s", "type": "custom", "name": "n", "status": "success", "started_at": "now", "events": events}],
+                }
+            )
 
     def test_write_atomic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -516,6 +619,27 @@ class TestDecorators:
             assert step["type"] == "tool_call"
             assert step["tool"]["name"] == "weather.lookup"
             assert step["tool"]["result"] == {"summary": "warm"}
+
+    def test_traced_tool_redacts_sensitive_args_and_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with TraceContext(task="test", output_dir=tmp):
+
+                @traced_tool("secret.tool")
+                def secret_tool(api_key: str) -> dict:
+                    return {"password": "super-secret", "visible": "ok"}
+
+                secret_tool(api_key="sk-live-secret123")
+
+            traces = list(Path(tmp).glob("*.trace.json"))
+            rendered = traces[0].read_text(encoding="utf-8")
+            data = json.loads(rendered)
+            step = data["steps"][0]
+            assert step["input"]["kwargs"]["api_key"] == "[REDACTED]"
+            assert step["tool"]["args"]["kwargs"]["api_key"] == "[REDACTED]"
+            assert step["output"]["password"] == "[REDACTED]"
+            assert step["tool"]["result"]["password"] == "[REDACTED]"
+            assert "sk-live-secret123" not in rendered
+            assert "super-secret" not in rendered
 
     def test_traced_step_captures_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
