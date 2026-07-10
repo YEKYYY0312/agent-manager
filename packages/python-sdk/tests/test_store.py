@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 import tempfile
+import types
 from pathlib import Path
 
 import pytest
 
-from agent_devtools import Cost, Step, TraceStore, new_run
+from agent_devtools import Cost, PostgresTraceStore, Step, TraceStore, create_trace_store, new_run
 
 
 def _trace(task: str = "Find customer") :
@@ -124,3 +126,107 @@ def test_trace_store_redacts_automatically_when_env_enabled(monkeypatch) -> None
 
     assert loaded.run.task == "Email [REDACTED]"
     assert loaded.steps[0].input["api_key"] == "[REDACTED]"
+
+
+def test_create_trace_store_uses_postgres_when_database_url_is_set(monkeypatch) -> None:
+    fake = _install_fake_psycopg(monkeypatch)
+
+    store = create_trace_store(database_url="postgresql://agent:secret@db.example/prod")
+
+    assert isinstance(store, PostgresTraceStore)
+    assert store.location == "postgresql://agent:***@db.example/prod"
+    assert fake.connect_calls[0]["dsn"] == "postgresql://agent:secret@db.example/prod"
+
+
+def test_postgres_trace_store_upserts_lists_and_loads_trace(monkeypatch) -> None:
+    fake = _install_fake_psycopg(monkeypatch)
+    store = PostgresTraceStore("postgresql://agent:secret@db.example/prod")
+    trace = _trace("Postgres trace")
+
+    run_id = store.upsert_trace(trace, source_path="traces/postgres.trace.json")
+    rows = store.list_traces()
+    loaded = store.get_trace(trace.run.id)
+
+    assert run_id == trace.run.id
+    assert rows[0].run_id == trace.run.id
+    assert rows[0].source_path == "traces/postgres.trace.json"
+    assert loaded is not None
+    assert loaded.run.id == trace.run.id
+    assert any("%s" in call["query"] for call in fake.execute_calls)
+    assert all("Postgres trace" not in call["query"] for call in fake.execute_calls)
+
+
+def test_postgres_trace_store_reports_missing_psycopg(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "psycopg", None)
+    monkeypatch.setitem(sys.modules, "psycopg.rows", None)
+
+    with pytest.raises(RuntimeError, match="psycopg"):
+        PostgresTraceStore("postgresql://agent:secret@db.example/prod")
+
+
+class _FakePsycopg:
+    def __init__(self) -> None:
+        self.rows: dict[str, dict[str, object]] = {}
+        self.connect_calls: list[dict[str, object]] = []
+        self.execute_calls: list[dict[str, object]] = []
+
+    def connect(self, dsn: str, row_factory=None):
+        self.connect_calls.append({"dsn": dsn, "row_factory": row_factory})
+        return _FakePostgresConnection(self)
+
+
+class _FakePostgresConnection:
+    def __init__(self, driver: _FakePsycopg) -> None:
+        self.driver = driver
+
+    def execute(self, query: str, params: tuple[object, ...] = ()):
+        self.driver.execute_calls.append({"query": query, "params": params})
+        normalized = " ".join(query.lower().split())
+        if normalized.startswith("insert into traces"):
+            row = {
+                "run_id": params[0],
+                "task": params[1],
+                "status": params[2],
+                "started_at": params[3],
+                "duration_ms": params[4],
+                "step_count": params[5],
+                "total_tokens": params[6],
+                "cost_usd": params[7],
+                "source_path": params[8],
+                "trace_json": params[9],
+                "imported_at": params[10],
+            }
+            self.driver.rows[str(params[0])] = row
+            return _FakePostgresCursor([])
+        if normalized.startswith("select trace_json from traces where run_id"):
+            row = self.driver.rows.get(str(params[0]))
+            return _FakePostgresCursor([{"trace_json": row["trace_json"]}] if row else [])
+        if normalized.startswith("select run_id"):
+            rows = sorted(self.driver.rows.values(), key=lambda row: (str(row["started_at"]), str(row["run_id"])), reverse=True)
+            return _FakePostgresCursor(rows[: int(params[-1])])
+        return _FakePostgresCursor([])
+
+    def commit(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class _FakePostgresCursor:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+
+    def fetchall(self):
+        return self.rows
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
+
+def _install_fake_psycopg(monkeypatch) -> _FakePsycopg:
+    fake = _FakePsycopg()
+    rows_module = types.SimpleNamespace(dict_row=object())
+    monkeypatch.setitem(sys.modules, "psycopg", fake)
+    monkeypatch.setitem(sys.modules, "psycopg.rows", rows_module)
+    return fake

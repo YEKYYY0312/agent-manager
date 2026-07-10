@@ -148,6 +148,17 @@ agent-devtools store list
 agent-devtools store search "weather"
 ```
 
+For a shared or production store, install the optional PostgreSQL extra and pass a database URL explicitly:
+
+```powershell
+python -m pip install -e ".[postgres]"
+$env:AGENT_DEVTOOLS_DATABASE_URL = "postgresql://agent:change-me@db.example:5432/agent_devtools"
+agent-devtools store import traces --redact --database-url $env:AGENT_DEVTOOLS_DATABASE_URL
+agent-devtools store list --database-url $env:AGENT_DEVTOOLS_DATABASE_URL
+```
+
+Do not commit real `.env` files or database credentials. `.env.example` is only a placeholder template.
+
 Export a trace as OpenTelemetry-compatible OTLP JSON:
 
 ```powershell
@@ -186,6 +197,7 @@ Run the full local checks:
 
 ```powershell
 py -m pytest
+py scripts\check_release_guardrails.py
 
 cd packages\web-ui
 npm run test:data

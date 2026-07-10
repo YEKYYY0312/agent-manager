@@ -14,6 +14,10 @@ Use this checklist before calling the project release-ready.
 - `packages/python-sdk/agent_devtools/adapters.py`
   - Request options must not override transport credentials or base URLs.
   - Tool calls must require structured object inputs before `**kwargs` execution.
+- `packages/python-sdk/agent_devtools/store.py`
+  - SQLite must remain the local default.
+  - PostgreSQL must require explicit `--database-url` or `PostgresTraceStore(...)`.
+  - Printed PostgreSQL locations must not reveal passwords.
 - `packages/web-ui/src/storage.ts`
   - localStorage stores only import metadata.
   - IndexedDB stores local user-imported trace content; this is local-first persistence, not cloud sync.
@@ -30,6 +34,7 @@ Use this checklist before calling the project release-ready.
 ## Verification Commands
 
 ```powershell
+py scripts\check_release_guardrails.py
 py -m pytest
 
 cd packages\web-ui
@@ -47,4 +52,4 @@ npm run build
 - No persistent browser storage of trace payloads except IndexedDB local imports.
 - No GitHub Actions write token unless a workflow explicitly needs it.
 - No `.env`, `.npmrc`, SQLite DB, OTLP export, trace, or replay plan committed.
-
+- No frontend local API endpoint pinned to port 3000, personal absolute paths, or undeclared Web imports.

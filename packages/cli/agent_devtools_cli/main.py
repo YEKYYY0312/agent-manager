@@ -45,10 +45,10 @@ from agent_devtools import (
     CallableAgentAdapter,
     Cost,
     Trace,
-    TraceStore,
     TraceWriter,
     RegressionThresholds,
     check_regression,
+    create_trace_store,
     create_replay_trace,
     push_trace_to_otlp_http,
     redact_trace,
@@ -895,33 +895,41 @@ def command_otel_push(args: argparse.Namespace) -> int:
 def command_store_import(args: argparse.Namespace) -> int:
     paths = _collect_trace_files(args.path, recursive=args.recursive, max_files=args.max_files)
     _preflight_sensitive_files(paths, args, "store")
-    store = TraceStore(args.db, redaction=args.redact)
+    store = _create_store_from_args(args, redaction=args.redact)
     run_ids = store.import_files(paths)
-    print(f"Imported {len(run_ids)} trace(s) into {store.db_path}")
+    print(f"Imported {len(run_ids)} trace(s) into {store.location}")
     return 0
 
 
 def command_store_list(args: argparse.Namespace) -> int:
-    store = TraceStore(args.db)
+    store = _create_store_from_args(args)
     rows = store.list_traces(query=args.query)
     _print_store_rows(rows)
     return 0
 
 
 def command_store_search(args: argparse.Namespace) -> int:
-    store = TraceStore(args.db)
+    store = _create_store_from_args(args)
     rows = store.search(args.query)
     _print_store_rows(rows)
     return 0
 
 
 def command_store_show(args: argparse.Namespace) -> int:
-    store = TraceStore(args.db)
+    store = _create_store_from_args(args)
     trace = store.get_trace(args.run_id)
     if trace is None:
         raise SystemExit(f"Trace not found in store: {args.run_id}")
     print(json.dumps(trace.to_dict(), indent=2, ensure_ascii=False, default=str))
     return 0
+
+
+def _create_store_from_args(args: argparse.Namespace, redaction: bool = False):
+    return create_trace_store(
+        db_path=args.db,
+        database_url=getattr(args, "database_url", None),
+        redaction=redaction,
+    )
 
 
 def _collect_trace_files(path_str: str, *, recursive: bool = False, max_files: int = 1000) -> list[Path]:
@@ -1132,31 +1140,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_otel_push.set_defaults(func=command_otel_push)
 
     # store
-    p_store = subparsers.add_parser("store", help="Import and search traces in a local SQLite store")
+    p_store = subparsers.add_parser("store", help="Import and search traces in a SQLite or PostgreSQL store")
     store_subparsers = p_store.add_subparsers(dest="store_command", required=True)
 
     p_store_import = store_subparsers.add_parser("import", help="Import a trace file or directory into SQLite")
     p_store_import.add_argument("path", help="Trace file or directory containing .trace.json files")
-    p_store_import.add_argument("--db", default=".agent-devtools/traces.db", help="SQLite database path")
+    p_store_import.add_argument("--db", default=".agent-devtools/traces.db", help="SQLite database path, ignored when --database-url is set")
+    p_store_import.add_argument("--database-url", help="PostgreSQL database URL. Requires agent-devtools-local[postgres]")
     p_store_import.add_argument("--redact", action="store_true", help="Redact sensitive values before storing")
     p_store_import.add_argument("--allow-sensitive", action="store_true", help="Store even when privacy-scan finds sensitive values")
     p_store_import.add_argument("--recursive", action="store_true", help="Recursively scan directories for .trace.json files")
     p_store_import.add_argument("--max-files", type=int, default=1000, help="Maximum trace files to import from a path")
     p_store_import.set_defaults(func=command_store_import)
 
-    p_store_list = store_subparsers.add_parser("list", help="List traces in SQLite")
-    p_store_list.add_argument("--db", default=".agent-devtools/traces.db", help="SQLite database path")
+    p_store_list = store_subparsers.add_parser("list", help="List traces in SQLite or PostgreSQL")
+    p_store_list.add_argument("--db", default=".agent-devtools/traces.db", help="SQLite database path, ignored when --database-url is set")
+    p_store_list.add_argument("--database-url", help="PostgreSQL database URL. Requires agent-devtools-local[postgres]")
     p_store_list.add_argument("--query", help="Optional search query")
     p_store_list.set_defaults(func=command_store_list)
 
-    p_store_search = store_subparsers.add_parser("search", help="Search traces in SQLite")
+    p_store_search = store_subparsers.add_parser("search", help="Search traces in SQLite or PostgreSQL")
     p_store_search.add_argument("query")
-    p_store_search.add_argument("--db", default=".agent-devtools/traces.db", help="SQLite database path")
+    p_store_search.add_argument("--db", default=".agent-devtools/traces.db", help="SQLite database path, ignored when --database-url is set")
+    p_store_search.add_argument("--database-url", help="PostgreSQL database URL. Requires agent-devtools-local[postgres]")
     p_store_search.set_defaults(func=command_store_search)
 
     p_store_show = store_subparsers.add_parser("show", help="Show a stored trace as JSON")
     p_store_show.add_argument("run_id")
-    p_store_show.add_argument("--db", default=".agent-devtools/traces.db", help="SQLite database path")
+    p_store_show.add_argument("--db", default=".agent-devtools/traces.db", help="SQLite database path, ignored when --database-url is set")
+    p_store_show.add_argument("--database-url", help="PostgreSQL database URL. Requires agent-devtools-local[postgres]")
     p_store_show.set_defaults(func=command_store_show)
 
     return parser

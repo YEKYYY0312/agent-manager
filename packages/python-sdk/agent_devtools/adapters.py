@@ -21,6 +21,8 @@ _FORBIDDEN_REQUEST_OPTION_KEYS = {
     "base-uri",
     "organization",
     "default_headers",
+    "extra_headers",
+    "headers",
     "http_client",
     "timeout",
 }
@@ -274,7 +276,7 @@ class OpenAIAdapter:
 
         options = dict(self.request_options)
         if request_options:
-            options.update(request_options)
+            options.update(_safe_request_options(request_options))
 
         step_input = _openai_step_input(self.endpoint, input)
 
@@ -375,7 +377,7 @@ class AnthropicAdapter:
         options = {"max_tokens": 16000}
         options.update(self.request_options)
         if request_options:
-            options.update(request_options)
+            options.update(_safe_request_options(request_options))
 
         messages = _anthropic_messages(input)
 

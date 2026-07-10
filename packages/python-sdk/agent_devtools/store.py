@@ -1,14 +1,16 @@
-"""Local SQLite storage for trace files."""
+"""Local and production storage for trace files."""
 
 from __future__ import annotations
 
+import importlib
 import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Generator, Iterable
+from typing import Any, Generator, Iterable
+from urllib.parse import urlsplit, urlunsplit
 
 from .redaction import RedactionConfig, normalize_redaction_config, redact_trace
 from .trace import Trace
@@ -35,6 +37,10 @@ class TraceStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.redaction = normalize_redaction_config(redaction)
         self._init_db()
+
+    @property
+    def location(self) -> str:
+        return str(self.db_path)
 
     def upsert_trace(self, trace: Trace, source_path: str | Path = "") -> str:
         trace = self._to_storable_trace(trace)
@@ -168,6 +174,163 @@ class TraceStore:
             conn.close()
 
 
+class PostgresTraceStore:
+    """PostgreSQL-backed trace store for shared or production deployments."""
+
+    def __init__(self, database_url: str, redaction: bool | RedactionConfig | None = None) -> None:
+        if not database_url:
+            raise ValueError("database_url is required for PostgresTraceStore")
+        self.database_url = database_url
+        self.redaction = normalize_redaction_config(redaction)
+        self._psycopg, self._dict_row = _load_psycopg()
+        self._init_db()
+
+    @property
+    def location(self) -> str:
+        return _mask_database_url(self.database_url)
+
+    def upsert_trace(self, trace: Trace, source_path: str | Path = "") -> str:
+        trace = self._to_storable_trace(trace)
+        total = trace.total_cost()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO traces (
+                  run_id, task, status, started_at, duration_ms, step_count,
+                  total_tokens, cost_usd, source_path, trace_json, imported_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT(run_id) DO UPDATE SET
+                  task=excluded.task,
+                  status=excluded.status,
+                  started_at=excluded.started_at,
+                  duration_ms=excluded.duration_ms,
+                  step_count=excluded.step_count,
+                  total_tokens=excluded.total_tokens,
+                  cost_usd=excluded.cost_usd,
+                  source_path=excluded.source_path,
+                  trace_json=excluded.trace_json,
+                  imported_at=excluded.imported_at
+                """,
+                (
+                    trace.run.id,
+                    trace.run.task,
+                    trace.run.status,
+                    trace.run.started_at,
+                    trace.run.duration_ms,
+                    len(trace.steps),
+                    total.total_tokens,
+                    total.amount_usd,
+                    str(source_path) if source_path else "",
+                    json.dumps(trace.to_dict(), ensure_ascii=False, default=str, allow_nan=False),
+                    _utc_now(),
+                ),
+            )
+        return trace.run.id
+
+    def import_file(self, path: str | Path) -> str:
+        trace_path = Path(path)
+        trace = Trace.from_file(str(trace_path))
+        return self.upsert_trace(trace, source_path=trace_path)
+
+    def import_files(self, paths: Iterable[str | Path]) -> list[str]:
+        return [self.import_file(path) for path in paths]
+
+    def list_traces(self, query: str | None = None, limit: int = 100) -> list[StoredTraceSummary]:
+        if query:
+            return self.search(query, limit=limit)
+        limit = _safe_limit(limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT run_id, task, status, started_at, duration_ms, step_count,
+                       total_tokens, cost_usd, source_path
+                FROM traces
+                ORDER BY started_at DESC, run_id DESC
+                LIMIT %s
+                """,
+                (limit,),
+            ).fetchall()
+        return [_summary(row) for row in rows]
+
+    def search(self, query: str, limit: int = 100) -> list[StoredTraceSummary]:
+        limit = _safe_limit(limit)
+        pattern = f"%{_escape_like(query)}%"
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT run_id, task, status, started_at, duration_ms, step_count,
+                       total_tokens, cost_usd, source_path
+                FROM traces
+                WHERE run_id LIKE %s ESCAPE '\\'
+                   OR task LIKE %s ESCAPE '\\'
+                   OR status LIKE %s ESCAPE '\\'
+                   OR source_path LIKE %s ESCAPE '\\'
+                ORDER BY started_at DESC, run_id DESC
+                LIMIT %s
+                """,
+                (pattern, pattern, pattern, pattern, limit),
+            ).fetchall()
+        return [_summary(row) for row in rows]
+
+    def get_trace(self, run_id: str) -> Trace | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT trace_json FROM traces WHERE run_id = %s",
+                (run_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return _trace_from_json_value(row["trace_json"])
+
+    def _init_db(self) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS traces (
+                  run_id TEXT PRIMARY KEY,
+                  task TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  started_at TEXT NOT NULL,
+                  duration_ms DOUBLE PRECISION,
+                  step_count INTEGER NOT NULL,
+                  total_tokens INTEGER NOT NULL,
+                  cost_usd DOUBLE PRECISION NOT NULL,
+                  source_path TEXT NOT NULL,
+                  trace_json TEXT NOT NULL,
+                  imported_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_traces_status ON traces(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_traces_task ON traces(task)")
+
+    def _to_storable_trace(self, trace: Trace) -> Trace:
+        if self.redaction is None:
+            return trace
+        return redact_trace(trace, self.redaction)
+
+    @contextmanager
+    def _connect(self) -> Generator[Any, None, None]:
+        conn = self._psycopg.connect(self.database_url, row_factory=self._dict_row)
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def create_trace_store(
+    *,
+    db_path: str | Path = ".agent-devtools/traces.db",
+    database_url: str | None = None,
+    redaction: bool | RedactionConfig | None = None,
+) -> TraceStore | PostgresTraceStore:
+    if database_url:
+        return PostgresTraceStore(database_url, redaction=redaction)
+    return TraceStore(db_path, redaction=redaction)
+
+
 def _summary(row: sqlite3.Row) -> StoredTraceSummary:
     return StoredTraceSummary(
         run_id=row["run_id"],
@@ -180,6 +343,35 @@ def _summary(row: sqlite3.Row) -> StoredTraceSummary:
         cost_usd=row["cost_usd"],
         source_path=row["source_path"],
     )
+
+
+def _trace_from_json_value(value: Any) -> Trace:
+    if isinstance(value, str):
+        data = json.loads(value)
+    else:
+        data = value
+    return Trace.from_dict(data)
+
+
+def _load_psycopg() -> tuple[Any, Any]:
+    try:
+        psycopg = importlib.import_module("psycopg")
+        rows = importlib.import_module("psycopg.rows")
+    except ImportError as exc:
+        raise RuntimeError("PostgreSQL storage requires psycopg. Install with: pip install agent-devtools-local[postgres]") from exc
+    return psycopg, rows.dict_row
+
+
+def _mask_database_url(database_url: str) -> str:
+    parsed = urlsplit(database_url)
+    if not parsed.password:
+        return database_url
+    host = parsed.hostname or ""
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+    username = parsed.username or ""
+    auth = f"{username}:***@" if username else "***@"
+    return urlunsplit((parsed.scheme, auth + host, parsed.path, parsed.query, parsed.fragment))
 
 
 def _utc_now() -> str:

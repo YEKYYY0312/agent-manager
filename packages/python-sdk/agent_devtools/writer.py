@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import re
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -18,6 +17,7 @@ if TYPE_CHECKING:
     from .trace import Trace
 
 from .redaction import RedactionConfig, normalize_redaction_config, redact_value
+from .trace import _max_step_events
 
 
 class TraceWriter:
@@ -168,17 +168,6 @@ def _validate_structure(data: dict) -> None:
         parent_id = step.get("parent_id")
         if parent_id and str(parent_id) not in step_ids:
             raise ValueError(f"steps[{i}] references unknown parent_id: {parent_id}")
-
-
-def _max_step_events() -> int:
-    raw = os.getenv("AGENT_DEVTOOLS_MAX_STEP_EVENTS", "").strip()
-    if not raw:
-        return 1000
-    try:
-        value = int(raw)
-    except ValueError:
-        return 1000
-    return value if value > 0 else 1000
 
 
 def _validate_cost_values(cost: Any, path: str) -> None:

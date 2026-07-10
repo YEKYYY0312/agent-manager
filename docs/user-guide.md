@@ -186,7 +186,7 @@ packages/web-ui/public/traces/
 
 In the Web UI, use the Trace list import button to select a local `.trace.json` file. You can also drag a `.trace.json` file onto the Trace list area.
 
-Imported trace labels are saved in the current browser's local storage as history, but full trace contents stay in memory to avoid persisting prompts, tool arguments, or secrets in browser storage. After refresh, re-import the file to inspect its contents again. Clearing site data or switching browsers removes the import history.
+Imported trace labels are saved in the current browser's localStorage as lightweight metadata. Full imported trace contents are encrypted with browser Web Crypto AES-GCM before being saved in IndexedDB, so the same browser can reopen them after refresh without keeping plaintext trace JSON in localStorage. Clearing site data or switching browsers removes the import history and encrypted content.
 
 Invalid JSON or invalid trace-shaped files show an error banner instead of crashing the page.
 
@@ -239,6 +239,17 @@ py packages\cli\agent_devtools_cli\main.py store list
 py packages\cli\agent_devtools_cli\main.py store search "weather"
 py packages\cli\agent_devtools_cli\main.py store show <run-id>
 ```
+
+Use PostgreSQL for shared or production storage by installing the optional extra and passing the DSN explicitly:
+
+```powershell
+python -m pip install -e ".[postgres]"
+$env:AGENT_DEVTOOLS_DATABASE_URL = "postgresql://agent:change-me@db.example:5432/agent_devtools"
+py packages\cli\agent_devtools_cli\main.py store import traces --redact --database-url $env:AGENT_DEVTOOLS_DATABASE_URL
+py packages\cli\agent_devtools_cli\main.py store list --database-url $env:AGENT_DEVTOOLS_DATABASE_URL
+```
+
+Keep real credentials out of `.env` files committed to the repository. `.env.example` is only a placeholder template.
 
 `store import` stops when sensitive values are found unless you pass `--redact` or `--allow-sensitive`.
 

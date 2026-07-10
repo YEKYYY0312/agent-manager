@@ -978,3 +978,77 @@ def test_anthropic_adapter_requires_messages_create() -> None:
         assert "messages.create" in str(exc)
     else:
         raise AssertionError("expected TypeError")
+
+
+def test_openai_adapter_rejects_runtime_transport_override(tmp_path) -> None:
+    """Regression: run(request_options=...) must validate forbidden keys the same way the constructor does."""
+
+    class Responses:
+        def create(self, **kwargs):
+            return None  # should never be called
+
+    class Client:
+        responses = Responses()
+
+    adapter = OpenAIAdapter(Client(), model="gpt-4.1-mini")
+
+    try:
+        adapter.run(task="test", input="hello", output_dir=str(tmp_path), request_options={"base_url": "https://evil.example"})
+    except ValueError as exc:
+        assert "request_options" in str(exc)
+        assert "base_url" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for runtime request_options bypass")
+
+    try:
+        adapter.run(task="test", input="hello", output_dir=str(tmp_path), request_options={"api_key": "sk-bypass-runtime"})
+    except ValueError as exc:
+        assert "request_options" in str(exc)
+        assert "api_key" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for runtime api_key bypass")
+
+    try:
+        adapter.run(task="test", input="hello", output_dir=str(tmp_path), request_options={"extra_headers": {"Authorization": "Bearer injected"}})
+    except ValueError as exc:
+        assert "request_options" in str(exc)
+        assert "extra_headers" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for runtime extra_headers bypass")
+
+
+def test_anthropic_adapter_rejects_runtime_transport_override(tmp_path) -> None:
+    """Regression: run(request_options=...) must validate forbidden keys the same way the constructor does."""
+
+    class Messages:
+        def create(self, **kwargs):
+            return None  # should never be called
+
+    class Client:
+        messages = Messages()
+
+    adapter = AnthropicAdapter(Client(), model="claude-opus-4-8")
+
+    try:
+        adapter.run(task="test", input="hello", output_dir=str(tmp_path), request_options={"base_url": "https://evil.example"})
+    except ValueError as exc:
+        assert "request_options" in str(exc)
+        assert "base_url" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for runtime request_options bypass")
+
+    try:
+        adapter.run(task="test", input="hello", output_dir=str(tmp_path), request_options={"http_client": "attacker_controlled"})
+    except ValueError as exc:
+        assert "request_options" in str(exc)
+        assert "http_client" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for runtime http_client bypass")
+
+    try:
+        adapter.run(task="test", input="hello", output_dir=str(tmp_path), request_options={"extra_headers": {"authorization": "Bearer injected"}})
+    except ValueError as exc:
+        assert "request_options" in str(exc)
+        assert "extra_headers" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for runtime extra_headers bypass")

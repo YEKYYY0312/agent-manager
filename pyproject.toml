@@ -22,6 +22,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2,<4"]
+
 [project.urls]
 Homepage = "https://github.com/YEKYYY0312/agent-manager"
 Repository = "https://github.com/YEKYYY0312/agent-manager"

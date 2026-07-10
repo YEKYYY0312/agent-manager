@@ -1041,6 +1041,43 @@ class TestOtelPushCommand:
 
 
 class TestStoreCommand:
+    def test_store_import_accepts_database_url_without_printing_password(self, monkeypatch, capsys) -> None:
+        captured: dict[str, Any] = {}
+
+        class FakeStore:
+            location = "postgresql://agent:***@db.example/prod"
+
+            def import_files(self, paths):
+                captured["paths"] = paths
+                return ["run_1"]
+
+        def fake_create_trace_store(*, db_path, database_url, redaction=False):
+            captured["db_path"] = db_path
+            captured["database_url"] = database_url
+            captured["redaction"] = redaction
+            return FakeStore()
+
+        monkeypatch.setattr(cli_main, "create_trace_store", fake_create_trace_store)
+        with tempfile.TemporaryDirectory() as tmp:
+            source = _write_trace(tmp, _make_success_trace(), "success.trace.json")
+
+            rc = main([
+                "store",
+                "import",
+                str(source),
+                "--database-url",
+                "postgresql://agent:secret@db.example/prod",
+                "--redact",
+            ])
+
+        assert rc == 0
+        assert captured["database_url"] == "postgresql://agent:secret@db.example/prod"
+        assert captured["redaction"] is True
+        assert len(captured["paths"]) == 1
+        out = capsys.readouterr().out
+        assert "postgresql://agent:***@db.example/prod" in out
+        assert "secret" not in out
+
     def test_store_import_list_search_and_show(self, capsys) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "traces.db"

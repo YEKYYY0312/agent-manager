@@ -13,7 +13,7 @@ from .redaction import RedactionConfig, SecretFinding, redact_trace, redact_valu
 from .regression import RegressionCheck, RegressionReport, RegressionThresholds, check_regression
 from .replay import create_replay_trace, replay_with_adapter
 from .replay_compare import ReplayComparisonDelta, ReplayComparisonReport, ReplayStepChange, compare_replay
-from .store import StoredTraceSummary, TraceStore
+from .store import PostgresTraceStore, StoredTraceSummary, TraceStore, create_trace_store
 from .trace import (
     Cost,
     Error,
@@ -75,5 +75,7 @@ __all__ = [
     "RegressionThresholds",
     "check_regression",
     "TraceStore",
+    "PostgresTraceStore",
+    "create_trace_store",
     "StoredTraceSummary",
 ]

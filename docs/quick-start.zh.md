@@ -191,6 +191,17 @@ py packages\cli\agent_devtools_cli\main.py store list
 py packages\cli\agent_devtools_cli\main.py store search "weather"
 ```
 
+如果要给共享环境或生产环境用 PostgreSQL，先安装可选依赖，并显式传入数据库地址：
+
+```powershell
+python -m pip install -e ".[postgres]"
+$env:AGENT_DEVTOOLS_DATABASE_URL = "postgresql://agent:change-me@db.example:5432/agent_devtools"
+py packages\cli\agent_devtools_cli\main.py store import traces --redact --database-url $env:AGENT_DEVTOOLS_DATABASE_URL
+py packages\cli\agent_devtools_cli\main.py store list --database-url $env:AGENT_DEVTOOLS_DATABASE_URL
+```
+
+不要把真实 `.env` 或数据库密码提交进仓库；`.env.example` 只是占位模板。
+
 导出成 OpenTelemetry 兼容的 OTLP JSON：
 
 ```powershell
