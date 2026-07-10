@@ -127,7 +127,7 @@ For real execution replay from local Python code, use `replay-adapter`:
 py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace-file>.trace.json --start-step <step-id> --callable path\to\agent.py:run --allow-unsafe-code --output-dir traces
 ```
 
-The `--callable` value can be `module:function` or `path\to\file.py:function`. This command executes local Python code, so it now refuses to run unless you add `--allow-unsafe-code`. Use it only with code you trust. Add `--input-json '{"question":"override"}'` when you want to override the recorded step input.
+The `--callable` value can be `module:function` or `path\to\file.py:function`. This command executes local Python code, so it refuses to run unless you add `--allow-unsafe-code`. The callable runs in a child Python process, keeping temporary import paths out of the main CLI process, but it is not a sandbox. Use it only with code you trust. Add `--input-json '{"question":"override"}'` when you want to override the recorded step input.
 
 Compare the replay trace with the original trace:
 

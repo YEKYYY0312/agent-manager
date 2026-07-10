@@ -88,7 +88,7 @@ py packages\cli\agent_devtools_cli\main.py replay traces\<trace-file>.trace.json
 py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace-file>.trace.json --start-step <step-id> --callable path\to\agent.py:run --allow-unsafe-code --output-dir traces
 ```
 
-`--callable` 支持 `module:function` 或 `path\to\file.py:function`。这个命令会执行你的本地 Python 代码，所以默认会拒绝运行；只有你确认代码可信时才加 `--allow-unsafe-code`。
+`--callable` 支持 `module:function` 或 `path\to\file.py:function`。这个命令会执行你的本地 Python 代码，所以默认会拒绝运行；只有你确认代码可信时才加 `--allow-unsafe-code`。callable 会在子 Python 进程里运行，临时 import path 不会污染主 CLI 进程，但这不是沙箱。
 
 生成 replay trace 后，可以自动对比原始运行和 replay 运行：
 

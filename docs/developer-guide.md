@@ -130,7 +130,7 @@ The CLI `replay` command is still deterministic. For real local Python execution
 py packages\cli\agent_devtools_cli\main.py replay-adapter traces\<trace>.trace.json --start-step <step-id> --callable path\to\agent.py:run --allow-unsafe-code --output-dir traces
 ```
 
-The callable import path accepts `module:function` or `path\to\file.py:function`. Use `--input-json` to override the selected step input and `--pythonpath` for extra module import paths. Extra import paths are applied only while resolving the callable so the process `sys.path` is restored afterward.
+The callable import path accepts `module:function` or `path\to\file.py:function`. Use `--input-json` to override the selected step input and `--pythonpath` for extra module import paths. CLI callable replay executes in a child Python process; extra import paths are applied only inside that child process so the main CLI `sys.path` is not modified.
 
 The deterministic `replay` command can also read a Replay Plan JSON:
 

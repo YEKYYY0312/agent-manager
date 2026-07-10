@@ -230,7 +230,7 @@ The CLI exposes explicit callable adapter replay with `replay-adapter`:
 py packages\cli\agent_devtools_cli\main.py replay-adapter traces\source.trace.json --start-step <step-id> --callable path\to\agent.py:run --allow-unsafe-code --output-dir traces
 ```
 
-This command executes local Python code only after `--callable` and `--allow-unsafe-code` are provided. The callable path can be `module:function` or `path\to\file.py:function`. Use `--input-json '{"question":"override"}'` to override the recorded step input.
+This command executes local Python code only after `--callable` and `--allow-unsafe-code` are provided. The callable runs in a child Python process so import path changes do not leak into the main CLI process. The callable path can be `module:function` or `path\to\file.py:function`. Use `--input-json '{"question":"override"}'` to override the recorded step input.
 
 After creating a replay trace, compare it against the source trace:
 

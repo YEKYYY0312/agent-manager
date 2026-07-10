@@ -23,11 +23,13 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import base64
 from contextlib import contextmanager
 import importlib
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -56,6 +58,7 @@ from agent_devtools import (
 from agent_devtools.analysis import analyze
 from agent_devtools.experiment import compare_experiment
 from agent_devtools.replay_compare import compare_replay
+from agent_devtools.replay import _adapter_input, _find_start_index
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -439,35 +442,102 @@ def command_replay_adapter(args: argparse.Namespace) -> int:
         raise SystemExit("replay-adapter executes unsafe code from --callable. Re-run with --allow-unsafe-code only for code you trust.")
 
     source = _load(args.trace)
-    callable_fn = _load_callable(args.callable, args.pythonpath)
-    adapter = CallableAgentAdapter(callable_fn, name=args.name)
+    start_index = _find_start_index(source, args.start_step)
+    start_step = source.steps[start_index]
+    replay_input = _parse_json_arg(args.input_json, "--input-json") if args.input_json is not None else _adapter_input(start_step)
+    adapter_name = args.name or _callable_label(args.callable)
 
-    replay_kwargs: dict[str, Any] = {
-        "source": source,
-        "start_step_id": args.start_step,
-        "adapter": adapter,
-        "output_dir": args.output_dir,
-    }
-    if args.input_json is not None:
-        replay_kwargs["input"] = _parse_json_arg(args.input_json, "--input-json")
+    labels = dict(source.run.labels)
+    labels.update(
+        {
+            "replay": "true",
+            "replay_mode": "adapter_execution",
+            "source_run_id": source.run.id,
+            "source_start_step_id": args.start_step,
+            "source_run_status": source.run.status,
+        }
+    )
 
-    try:
-        result = replay_with_adapter(**replay_kwargs)
-    except ValueError as exc:
-        raise SystemExit(str(exc))
+    result = _run_callable_replay_subprocess(
+        callable_spec=args.callable,
+        input_value=replay_input,
+        task=f"Replay: {source.run.task}",
+        labels=labels,
+        output_dir=args.output_dir,
+        name=args.name,
+        pythonpath=args.pythonpath,
+    )
+    trace = Trace.from_dict(result["trace"])
+    output = result.get("output")
+    error = result.get("error")
+    path = Path(result["trace_path"])
 
-    path = Path(args.output_dir) / f"{result.trace.run.id}.trace.json"
     print(f"Adapter replay trace written: {path}")
     print(f"Source run: {source.run.id}")
-    print(f"Replay run: {result.trace.run.id}")
-    print(f"Status:     {result.trace.run.status}")
-    print(f"Adapter:    {adapter.name}")
-    if result.output is not None:
-        print(f"Output:     {_truncate(str(result.output), 100)}")
-    if result.error is not None:
-        print(f"Error:      {result.error.type}: {result.error.message}")
+    print(f"Replay run: {trace.run.id}")
+    print(f"Status:     {trace.run.status}")
+    print(f"Adapter:    {adapter_name}")
+    if output is not None:
+        print(f"Output:     {_truncate(str(output), 100)}")
+    if error is not None:
+        print(f"Error:      {error.get('type', '')}: {error.get('message', '')}")
         return 1
     return 0
+
+
+def _callable_label(spec: str) -> str:
+    target, _, attr_path = spec.rpartition(":")
+    return attr_path or target or spec
+
+
+def _run_callable_replay_subprocess(
+    *,
+    callable_spec: str,
+    input_value: Any,
+    task: str,
+    labels: dict[str, str],
+    output_dir: str,
+    name: str | None,
+    pythonpath: list[str] | None,
+) -> dict[str, Any]:
+    request = {
+        "callable": callable_spec,
+        "input": input_value,
+        "task": task,
+        "labels": labels,
+        "output_dir": output_dir,
+        "name": name,
+        "pythonpath": pythonpath or [],
+    }
+    env = os.environ.copy()
+    sdk_path = str(_sdk)
+    cli_path = str(Path(__file__).resolve().parents[1])
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join(part for part in [sdk_path, cli_path, existing_pythonpath] if part)
+    proc = subprocess.run(
+        [sys.executable, "-m", "agent_devtools_cli.callable_runner"],
+        input=_encode_runner_payload(request),
+        text=True,
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
+        raise SystemExit(f"Callable replay subprocess failed: {detail}")
+    try:
+        return json.loads(_decode_runner_payload(proc.stdout.strip()))
+    except Exception as exc:
+        raise SystemExit(f"Callable replay subprocess returned invalid JSON: {exc}") from exc
+
+
+def _encode_runner_payload(value: Any) -> str:
+    data = json.dumps(value, ensure_ascii=False, default=str).encode("utf-8")
+    return base64.b64encode(data).decode("ascii")
+
+
+def _decode_runner_payload(value: str) -> str:
+    return base64.b64decode(value.encode("ascii")).decode("utf-8")
 
 
 def _load_callable(spec: str, pythonpath: list[str] | None = None) -> Callable[[Any], Any]:

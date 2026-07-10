@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -538,6 +539,42 @@ class TestReplayCommand:
             replay_data = json.loads(written[0].read_text(encoding="utf-8"))
             assert replay_data["steps"][0]["input"] == {"question": "override"}
             assert replay_data["steps"][0]["output"] == {"answer": "override"}
+
+    def test_replay_adapter_executes_callable_in_child_process(self, capsys) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = _make_success_trace()
+            trace.steps[0].input = {"question": "weather"}
+            source = _write_trace(tmp, trace)
+            out_dir = Path(tmp) / "runtime-replays"
+            marker_path = Path(tmp) / "import-pid.txt"
+            module_path = Path(tmp) / "demo_agent.py"
+            module_path.write_text(
+                "import os\n"
+                f"open({str(marker_path)!r}, 'w', encoding='utf-8').write(str(os.getpid()))\n"
+                "def run(payload):\n"
+                "    return {'pid': os.getpid(), 'question': payload['question']}\n",
+                encoding="utf-8",
+            )
+
+            rc = main([
+                "replay-adapter",
+                str(source),
+                "--start-step",
+                trace.steps[0].id,
+                "--callable",
+                f"{module_path}:run",
+                "--allow-unsafe-code",
+                "--output-dir",
+                str(out_dir),
+            ])
+
+            assert rc == 0
+            capsys.readouterr()
+            import_pid = int(marker_path.read_text(encoding="utf-8"))
+            assert import_pid != os.getpid()
+            written = list(out_dir.glob("*.trace.json"))
+            replay_data = json.loads(written[0].read_text(encoding="utf-8"))
+            assert replay_data["steps"][0]["output"]["pid"] == import_pid
 
     def test_replay_adapter_rejects_missing_callable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
