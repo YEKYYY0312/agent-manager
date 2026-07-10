@@ -6,6 +6,7 @@ replaces sensitive fields, and returns a new Trace without mutating the source.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -84,6 +85,22 @@ class SecretFinding:
 
     def to_dict(self) -> dict[str, str]:
         return {"path": self.path, "kind": self.kind}
+
+
+def normalize_redaction_config(redaction: bool | RedactionConfig | None) -> RedactionConfig | None:
+    """Resolve caller/env redaction settings to a concrete config."""
+
+    if redaction is True:
+        return RedactionConfig()
+    if isinstance(redaction, RedactionConfig):
+        return redaction
+    if redaction is None and redaction_env_enabled():
+        return RedactionConfig()
+    return None
+
+
+def redaction_env_enabled() -> bool:
+    return os.getenv("AGENT_DEVTOOLS_REDACT_ON_WRITE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def redact_trace(trace: Trace, config: RedactionConfig | None = None) -> Trace:

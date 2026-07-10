@@ -338,7 +338,7 @@ class AnthropicAdapter:
         tools: dict[str, Callable[..., Any]] | None = None,
         max_tool_rounds: int = 4,
     ) -> None:
-        _create_method(client, ["messages", "create"], endpoint="messages")
+        _create_method(client, ["messages", "create"], endpoint="messages", adapter_name="AnthropicAdapter")
         if max_tool_rounds < 0:
             raise ValueError("max_tool_rounds must be greater than or equal to 0")
         self.client = client
@@ -450,7 +450,7 @@ class AnthropicAdapter:
             return AdapterRunResult(output=output, trace=ctx.trace, error=error)
 
     def _create(self, messages: list[dict[str, Any]], options: dict[str, Any]) -> Any:
-        create = _create_method(self.client, ["messages", "create"], endpoint="messages")
+        create = _create_method(self.client, ["messages", "create"], endpoint="messages", adapter_name="AnthropicAdapter")
         return create(model=self.model, messages=deepcopy(messages), **options)
 
     def _execute_tool_use(
@@ -619,14 +619,14 @@ def _namespace(value: Any) -> str:
     return str(value)
 
 
-def _create_method(root: Any, path: list[str], endpoint: str) -> Callable:
+def _create_method(root: Any, path: list[str], endpoint: str, adapter_name: str = "OpenAIAdapter") -> Callable:
     current = root
     for part in path:
         current = getattr(current, part, None)
         if current is None:
-            raise TypeError(f"OpenAIAdapter endpoint '{endpoint}' requires client.{'.'.join(path)}")
+            raise TypeError(f"{adapter_name} endpoint '{endpoint}' requires client.{'.'.join(path)}")
     if not callable(current):
-        raise TypeError(f"OpenAIAdapter endpoint '{endpoint}' requires client.{'.'.join(path)} to be callable")
+        raise TypeError(f"{adapter_name} endpoint '{endpoint}' requires client.{'.'.join(path)} to be callable")
     return current
 
 

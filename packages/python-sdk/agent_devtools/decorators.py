@@ -21,6 +21,8 @@ Usage::
 from __future__ import annotations
 
 import functools
+import json
+import os
 import sys
 import time
 from typing import Any, Callable
@@ -28,6 +30,9 @@ from typing import Any, Callable
 from .context import current_trace
 from .redaction import redact_value
 from .trace import Cost, Error as TraceError, Step, StepType, ToolCall
+
+DEFAULT_MAX_DECORATOR_PAYLOAD_BYTES = 1024 * 1024
+TRUNCATION_PREVIEW_BYTES = 256
 
 
 def traced_step(
@@ -181,24 +186,67 @@ def _serialize_input(args: tuple, kwargs: dict) -> Any:
     if not kwargs and len(args) == 1:
         val = args[0]
         serialized = val if isinstance(val, (str, dict, list, int, float, bool, type(None))) else str(val)
-        return redact_value(serialized)
+        return _redact_and_bound(serialized)
     parts: dict[str, Any] = {}
     if args:
         parts["args"] = [_safe(arg) for arg in args]
     if kwargs:
         parts["kwargs"] = {k: _safe(v) for k, v in kwargs.items()}
-    return redact_value(parts) if parts else ""
+    return _redact_and_bound(parts) if parts else ""
 
 
 def _serialize_output(result: Any) -> Any:
     """Best-effort output serialization."""
     if isinstance(result, (str, dict, list, int, float, bool, type(None))):
-        return redact_value(result)
+        return _redact_and_bound(result)
     if hasattr(result, "model_dump"):
-        return redact_value(result.model_dump())
+        return _redact_and_bound(result.model_dump())
     if hasattr(result, "__dict__"):
-        return redact_value(str(result))
-    return redact_value(str(result))
+        return _redact_and_bound(str(result))
+    return _redact_and_bound(str(result))
+
+
+def _redact_and_bound(value: Any) -> Any:
+    return _bound_payload(redact_value(value))
+
+
+def _bound_payload(value: Any) -> Any:
+    rendered = _render_payload(value)
+    size_bytes = len(rendered.encode("utf-8"))
+    max_bytes = _max_decorator_payload_bytes()
+    if size_bytes <= max_bytes:
+        return value
+    return {
+        "truncated": True,
+        "reason": "serialized_payload_too_large",
+        "size_bytes": size_bytes,
+        "max_bytes": max_bytes,
+        "preview": _truncate_utf8(rendered, min(TRUNCATION_PREVIEW_BYTES, max_bytes)),
+    }
+
+
+def _render_payload(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _truncate_utf8(value: str, max_bytes: int) -> str:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _max_decorator_payload_bytes() -> int:
+    raw = os.getenv("AGENT_DEVTOOLS_MAX_DECORATOR_PAYLOAD_BYTES", "").strip()
+    if not raw:
+        return DEFAULT_MAX_DECORATOR_PAYLOAD_BYTES
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_DECORATOR_PAYLOAD_BYTES
+    return value if value > 0 else DEFAULT_MAX_DECORATOR_PAYLOAD_BYTES
 
 
 def _safe(val: Any) -> Any:

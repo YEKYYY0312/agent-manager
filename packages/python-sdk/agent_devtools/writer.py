@@ -16,7 +16,7 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from .trace import Trace
 
-from .redaction import RedactionConfig, redact_value
+from .redaction import RedactionConfig, normalize_redaction_config, redact_value
 
 
 class TraceWriter:
@@ -32,7 +32,7 @@ class TraceWriter:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         self.output_dir = output_path.resolve()
-        self.redaction = _normalize_redaction(redaction)
+        self.redaction = normalize_redaction_config(redaction)
 
     def write(self, trace: Trace, filename: str | None = None) -> Path:
         """Persist *trace* to a ``.trace.json`` file.
@@ -72,20 +72,6 @@ class TraceWriter:
         if self.redaction is None:
             return data
         return redact_value(data, self.redaction)
-
-
-def _normalize_redaction(redaction: bool | RedactionConfig | None) -> RedactionConfig | None:
-    if redaction is True:
-        return RedactionConfig()
-    if isinstance(redaction, RedactionConfig):
-        return redaction
-    if redaction is None and _env_redaction_enabled():
-        return RedactionConfig()
-    return None
-
-
-def _env_redaction_enabled() -> bool:
-    return os.getenv("AGENT_DEVTOOLS_REDACT_ON_WRITE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _safe_trace_filename(run_id: str) -> str:

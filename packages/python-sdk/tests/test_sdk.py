@@ -657,6 +657,28 @@ class TestDecorators:
             assert "sk-live-secret123" not in rendered
             assert "super-secret" not in rendered
 
+    def test_traced_tool_truncates_oversized_results(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AGENT_DEVTOOLS_MAX_DECORATOR_PAYLOAD_BYTES", "64")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with TraceContext(task="test", output_dir=tmp):
+
+                @traced_tool("large.tool")
+                def large_tool() -> dict:
+                    return {"payload": "x" * 200}
+
+                large_tool()
+
+            traces = list(Path(tmp).glob("*.trace.json"))
+            data = json.loads(traces[0].read_text(encoding="utf-8"))
+            step = data["steps"][0]
+            assert step["output"]["truncated"] is True
+            assert step["output"]["reason"] == "serialized_payload_too_large"
+            assert step["output"]["max_bytes"] == 64
+            assert step["output"]["size_bytes"] > 64
+            assert len(json.dumps(step["output"], ensure_ascii=False)) < 400
+            assert step["tool"]["result"] == step["output"]
+
     def test_traced_step_captures_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with TraceContext(task="test", output_dir=tmp):

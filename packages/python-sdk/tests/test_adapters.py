@@ -963,6 +963,8 @@ def test_anthropic_adapter_requires_messages_create() -> None:
     try:
         AnthropicAdapter(object(), model="claude-opus-4-8")
     except TypeError as exc:
+        assert "AnthropicAdapter" in str(exc)
+        assert "OpenAIAdapter" not in str(exc)
         assert "messages.create" in str(exc)
     else:
         raise AssertionError("expected TypeError")

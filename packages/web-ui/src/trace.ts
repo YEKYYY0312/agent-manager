@@ -26,6 +26,7 @@ const emptyCost: Cost = {
 
 const MAX_BROWSER_TRACE_BYTES = 5 * 1024 * 1024;
 const TRACE_FETCH_TIMEOUT_MS = 10_000;
+const WINDOWS_PATH_SEPARATOR = String.fromCharCode(92);
 
 export async function loadTrace(url: string): Promise<Trace> {
   const safeUrl = safeTraceUrl(url);
@@ -295,7 +296,7 @@ function tracePathForCli(tracePath: string, runId: string): string {
     return `<path-to-${safeTraceFileName(fileName)}>`;
   }
   if (tracePath.endsWith('.trace.json')) {
-    return tracePath.replaceAll('\\', '/');
+    return normalizePathSeparators(tracePath);
   }
   return `traces/${safeTraceFileName(runId)}.trace.json`;
 }
@@ -304,7 +305,7 @@ function safeTraceUrl(url: string): string {
   if (!url.startsWith('/traces/')) {
     throw new Error('Trace URL is not allowed. Only bundled /traces/*.trace.json files can be fetched.');
   }
-  if (!url.endsWith('.trace.json') || url.includes('..') || url.includes('\\')) {
+  if (!url.endsWith('.trace.json') || url.includes('..') || hasWindowsPathSeparator(url)) {
     throw new Error('Trace URL is not allowed. Only bundled /traces/*.trace.json files can be fetched.');
   }
   return url;
@@ -312,9 +313,17 @@ function safeTraceUrl(url: string): string {
 
 function safeTraceFileName(value: string): string {
   const fallback = 'trace.trace.json';
-  const base = value.split(/[\\/]/).at(-1) || fallback;
+  const base = normalizePathSeparators(value).split('/').at(-1) || fallback;
   const safe = base.replace(/[^A-Za-z0-9._-]/g, '-').replace(/-+/g, '-');
   return safe || fallback;
+}
+
+function normalizePathSeparators(value: string): string {
+  return value.split(WINDOWS_PATH_SEPARATOR).join('/');
+}
+
+function hasWindowsPathSeparator(value: string): boolean {
+  return value.includes(WINDOWS_PATH_SEPARATOR);
 }
 
 function shellQuote(value: string): string {

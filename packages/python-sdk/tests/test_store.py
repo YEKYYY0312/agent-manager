@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 from pathlib import Path
+
+import pytest
 
 from agent_devtools import Cost, Step, TraceStore, new_run
 
@@ -49,6 +52,16 @@ def test_trace_store_roundtrips_full_trace() -> None:
 
     assert loaded.run.id == trace.run.id
     assert loaded.steps[0].name == "llm"
+
+
+def test_trace_store_rejects_non_finite_trace_json() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        store = TraceStore(Path(tmp) / "traces.db")
+        trace = _trace()
+        trace.run.final_output = math.nan
+
+        with pytest.raises(ValueError):
+            store.upsert_trace(trace)
 
 
 def test_trace_store_imports_trace_file_and_searches() -> None:

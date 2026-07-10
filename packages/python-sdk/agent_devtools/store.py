@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -11,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Generator, Iterable
 
-from .redaction import RedactionConfig, redact_trace
+from .redaction import RedactionConfig, normalize_redaction_config, redact_trace
 from .trace import Trace
 
 
@@ -34,7 +33,7 @@ class TraceStore:
     def __init__(self, db_path: str | Path = ".agent-devtools/traces.db", redaction: bool | RedactionConfig | None = None) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.redaction = _normalize_redaction(redaction)
+        self.redaction = normalize_redaction_config(redaction)
         self._init_db()
 
     def upsert_trace(self, trace: Trace, source_path: str | Path = "") -> str:
@@ -70,7 +69,7 @@ class TraceStore:
                     total.total_tokens,
                     total.amount_usd,
                     str(source_path) if source_path else "",
-                    json.dumps(trace.to_dict(), ensure_ascii=False, default=str),
+                    json.dumps(trace.to_dict(), ensure_ascii=False, default=str, allow_nan=False),
                     _utc_now(),
                 ),
             )
@@ -193,17 +192,3 @@ def _safe_limit(value: int) -> int:
     except (TypeError, ValueError):
         return 100
     return max(1, min(limit, 1000))
-
-
-def _normalize_redaction(redaction: bool | RedactionConfig | None) -> RedactionConfig | None:
-    if redaction is True:
-        return RedactionConfig()
-    if isinstance(redaction, RedactionConfig):
-        return redaction
-    if redaction is None and _env_redaction_enabled():
-        return RedactionConfig()
-    return None
-
-
-def _env_redaction_enabled() -> bool:
-    return os.getenv("AGENT_DEVTOOLS_REDACT_ON_WRITE", "").strip().lower() in {"1", "true", "yes", "on"}
