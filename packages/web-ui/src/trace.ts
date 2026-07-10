@@ -25,6 +25,7 @@ const emptyCost: Cost = {
 };
 
 const MAX_BROWSER_TRACE_BYTES = 5 * 1024 * 1024;
+const MAX_BROWSER_TRACE_DEPTH = 120;
 const TRACE_FETCH_TIMEOUT_MS = 10_000;
 const WINDOWS_PATH_SEPARATOR = String.fromCharCode(92);
 
@@ -43,6 +44,9 @@ export async function loadTrace(url: string): Promise<Trace> {
 }
 
 export async function loadTraceFromFile(file: File): Promise<Trace> {
+  if (!isAllowedTraceFileName(file.name)) {
+    throw new Error('Trace file extension is not allowed. Use .json or .trace.json.');
+  }
   if (file.size > MAX_BROWSER_TRACE_BYTES) {
     throw new Error(`Trace file is too large. Maximum size is ${MAX_BROWSER_TRACE_BYTES} bytes.`);
   }
@@ -51,6 +55,7 @@ export async function loadTraceFromFile(file: File): Promise<Trace> {
 }
 
 export function normalizeTrace(raw: unknown): Trace {
+  validateJsonDepth(raw, MAX_BROWSER_TRACE_DEPTH);
   if (!isRecord(raw)) {
     throw new Error('Trace root must be an object');
   }
@@ -316,6 +321,24 @@ function safeTraceFileName(value: string): string {
   const base = normalizePathSeparators(value).split('/').at(-1) || fallback;
   const safe = base.replace(/[^A-Za-z0-9._-]/g, '-').replace(/-+/g, '-');
   return safe || fallback;
+}
+
+function isAllowedTraceFileName(name: string): boolean {
+  const normalized = name.toLowerCase();
+  return normalized.endsWith('.json') || normalized.endsWith('.trace.json');
+}
+
+function validateJsonDepth(value: unknown, maxDepth: number, depth = 0): void {
+  if (depth > maxDepth) {
+    throw new Error(`Trace JSON exceeds maximum JSON depth of ${maxDepth}`);
+  }
+  if (Array.isArray(value)) {
+    for (const child of value) validateJsonDepth(child, maxDepth, depth + 1);
+    return;
+  }
+  if (isRecord(value)) {
+    for (const child of Object.values(value)) validateJsonDepth(child, maxDepth, depth + 1);
+  }
 }
 
 function normalizePathSeparators(value: string): string {

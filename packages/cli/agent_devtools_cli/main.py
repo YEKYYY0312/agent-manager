@@ -32,6 +32,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
@@ -447,6 +448,7 @@ def command_replay_adapter(args: argparse.Namespace) -> int:
     start_step = source.steps[start_index]
     replay_input = _parse_json_arg(args.input_json, "--input-json") if args.input_json is not None else _adapter_input(start_step)
     adapter_name = args.name or _callable_label(args.callable)
+    _print_callable_preflight(args.callable)
 
     labels = dict(source.run.labels)
     labels.update(
@@ -510,26 +512,38 @@ def _run_callable_replay_subprocess(
         "name": name,
         "pythonpath": pythonpath or [],
     }
+    response_fd, response_path = tempfile.mkstemp(prefix="agent-devtools-replay-", suffix=".json")
+    os.close(response_fd)
+    request["response_path"] = response_path
     env = os.environ.copy()
     sdk_path = str(_sdk)
     cli_path = str(Path(__file__).resolve().parents[1])
     existing_pythonpath = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = os.pathsep.join(part for part in [sdk_path, cli_path, existing_pythonpath] if part)
-    proc = subprocess.run(
-        [sys.executable, "-m", "agent_devtools_cli.callable_runner"],
-        input=_encode_runner_payload(request),
-        text=True,
-        capture_output=True,
-        env=env,
-        check=False,
-    )
-    if proc.returncode != 0:
-        detail = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
-        raise SystemExit(f"Callable replay subprocess failed: {detail}")
     try:
-        return json.loads(_decode_runner_payload(proc.stdout.strip()))
-    except Exception as exc:
-        raise SystemExit(f"Callable replay subprocess returned invalid JSON: {exc}") from exc
+        proc = subprocess.run(
+            [sys.executable, "-m", "agent_devtools_cli.callable_runner"],
+            input=_encode_runner_payload(request),
+            text=True,
+            capture_output=True,
+            env=env,
+            check=False,
+        )
+        if proc.returncode != 0:
+            detail = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
+            raise SystemExit(f"Callable replay subprocess failed: {detail}")
+        try:
+            encoded = Path(response_path).read_text(encoding="ascii").strip()
+            if not encoded:
+                raise ValueError("empty response")
+            return json.loads(_decode_runner_payload(encoded))
+        except Exception as exc:
+            raise SystemExit(f"Callable replay subprocess returned invalid JSON: {exc}") from exc
+    finally:
+        try:
+            Path(response_path).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _encode_runner_payload(value: Any) -> str:
@@ -559,6 +573,21 @@ def _load_callable(spec: str, pythonpath: list[str] | None = None) -> Callable[[
     if not callable(obj):
         raise SystemExit(f"Imported object is not callable: {spec}")
     return obj
+
+
+def _print_callable_preflight(spec: str) -> None:
+    target, _, _ = spec.rpartition(":")
+    if not target:
+        return
+    path = Path(target)
+    if path.suffix != ".py" and not path.exists():
+        return
+    if not path.exists():
+        return
+    resolved = path.resolve()
+    digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    print(f"Callable file: {resolved}")
+    print(f"Callable sha256: {digest}")
 
 
 def _unsafe_code_allowed(args: argparse.Namespace) -> bool:
@@ -1136,7 +1165,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return int(args.func(args))
+    try:
+        return int(args.func(args))
+    except KeyboardInterrupt:
+        print("Interrupted.", file=sys.stderr)
+        return 130
 
 
 if __name__ == "__main__":

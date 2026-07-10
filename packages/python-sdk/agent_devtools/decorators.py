@@ -32,7 +32,6 @@ from .redaction import redact_value
 from .trace import Cost, Error as TraceError, Step, StepType, ToolCall
 
 DEFAULT_MAX_DECORATOR_PAYLOAD_BYTES = 1024 * 1024
-TRUNCATION_PREVIEW_BYTES = 256
 
 
 def traced_step(
@@ -221,7 +220,7 @@ def _bound_payload(value: Any) -> Any:
         "reason": "serialized_payload_too_large",
         "size_bytes": size_bytes,
         "max_bytes": max_bytes,
-        "preview": _truncate_utf8(rendered, min(TRUNCATION_PREVIEW_BYTES, max_bytes)),
+        "payload_type": type(value).__name__,
     }
 
 
@@ -229,13 +228,6 @@ def _render_payload(value: Any) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=False, default=str)
-
-
-def _truncate_utf8(value: str, max_bytes: int) -> str:
-    encoded = value.encode("utf-8")
-    if len(encoded) <= max_bytes:
-        return value
-    return encoded[:max_bytes].decode("utf-8", errors="ignore")
 
 
 def _max_decorator_payload_bytes() -> int:
@@ -246,7 +238,9 @@ def _max_decorator_payload_bytes() -> int:
         value = int(raw)
     except ValueError:
         return DEFAULT_MAX_DECORATOR_PAYLOAD_BYTES
-    return value if value > 0 else DEFAULT_MAX_DECORATOR_PAYLOAD_BYTES
+    if value <= 0:
+        return DEFAULT_MAX_DECORATOR_PAYLOAD_BYTES
+    return min(value, DEFAULT_MAX_DECORATOR_PAYLOAD_BYTES)
 
 
 def _safe(val: Any) -> Any:

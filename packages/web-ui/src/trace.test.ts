@@ -213,6 +213,40 @@ test('normalizeTrace preserves missing cost as null', () => {
   assertEqual(trace.steps[0].tool, null, 'missing tool remains null');
 });
 
+test('normalizeTrace rejects deeply nested trace JSON', () => {
+  let nested: unknown = 0;
+  for (let index = 0; index < 130; index += 1) {
+    nested = [nested];
+  }
+
+  let message = '';
+  try {
+    normalizeTrace({
+      schema_version: '0.1.0',
+      run: {
+        id: 'run-deep',
+        task: 'deep',
+        status: 'success',
+        started_at: '2026-07-05T00:00:00Z',
+      },
+      steps: [
+        {
+          id: 'step-deep',
+          type: 'custom',
+          name: 'deep',
+          status: 'success',
+          started_at: '2026-07-05T00:00:00Z',
+          input: nested,
+        },
+      ],
+    });
+  } catch (error) {
+    message = String((error as Error).message);
+  }
+
+  assertEqual(message.includes('maximum JSON depth'), true, 'deep trace rejected');
+});
+
 test('listReplayCheckpoints returns only replayable steps in order', () => {
   const trace = cloneTrace(baseTrace);
   trace.steps[1].replayable = false;
@@ -429,4 +463,16 @@ await testAsync('loadTraceFromFile rejects oversized trace files', async () => {
   }
 
   assertEqual(message.includes('Trace file is too large'), true, 'oversized import rejected');
+});
+
+await testAsync('loadTraceFromFile rejects unsupported file extensions', async () => {
+  const file = new File([JSON.stringify(baseTrace)], 'trace.txt', { type: 'text/plain' });
+  let message = '';
+  try {
+    await loadTraceFromFile(file);
+  } catch (error) {
+    message = String((error as Error).message);
+  }
+
+  assertEqual(message.includes('Trace file extension is not allowed'), true, 'unsupported extension rejected');
 });

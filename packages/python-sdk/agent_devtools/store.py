@@ -102,17 +102,17 @@ class TraceStore:
 
     def search(self, query: str, limit: int = 100) -> list[StoredTraceSummary]:
         limit = _safe_limit(limit)
-        pattern = f"%{query}%"
+        pattern = f"%{_escape_like(query)}%"
         with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT run_id, task, status, started_at, duration_ms, step_count,
                        total_tokens, cost_usd, source_path
                 FROM traces
-                WHERE run_id LIKE ?
-                   OR task LIKE ?
-                   OR status LIKE ?
-                   OR source_path LIKE ?
+                WHERE run_id LIKE ? ESCAPE '\\'
+                   OR task LIKE ? ESCAPE '\\'
+                   OR status LIKE ? ESCAPE '\\'
+                   OR source_path LIKE ? ESCAPE '\\'
                 ORDER BY started_at DESC, run_id DESC
                 LIMIT ?
                 """,
@@ -192,3 +192,7 @@ def _safe_limit(value: int) -> int:
     except (TypeError, ValueError):
         return 100
     return max(1, min(limit, 1000))
+
+
+def _escape_like(value: str) -> str:
+    return str(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

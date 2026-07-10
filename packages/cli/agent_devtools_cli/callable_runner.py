@@ -34,7 +34,12 @@ def main() -> int:
             "trace_path": str(trace_path),
             "error": result.error.to_dict() if result.error else None,
         }
-        print(_encode(response), end="")
+        encoded = _encode(response)
+        response_path = request.get("response_path")
+        if response_path:
+            Path(response_path).write_text(encoded, encoding="ascii")
+        else:
+            print(encoded, end="")
         return 0
     except Exception as exc:
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)

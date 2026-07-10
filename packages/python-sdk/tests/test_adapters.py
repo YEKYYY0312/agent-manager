@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+import json
+
 from agent_devtools import AnthropicAdapter, CallableAgentAdapter, LangGraphAdapter, OpenAIAdapter, current_trace
+
+
+def _assert_trace_file_written(tmp_path, run_id: str) -> None:
+    for path in tmp_path.glob("*.trace.json"):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("run", {}).get("id") == run_id:
+            return
+    raise AssertionError(f"expected trace file for run {run_id}")
 
 
 def test_callable_agent_adapter_records_successful_callable_run(tmp_path) -> None:
@@ -29,7 +39,7 @@ def test_callable_agent_adapter_records_successful_callable_run(tmp_path) -> Non
     assert result.trace.steps[0].name == "demo-agent.run"
     assert result.trace.steps[0].input == {"question": "weather"}
     assert result.trace.steps[0].output == {"answer": "WEATHER"}
-    assert (tmp_path / f"{result.trace.run.id}.trace.json").exists()
+    _assert_trace_file_written(tmp_path, result.trace.run.id)
 
 
 def test_callable_agent_adapter_captures_errors_as_failed_traces(tmp_path) -> None:
@@ -55,7 +65,7 @@ def test_callable_agent_adapter_captures_errors_as_failed_traces(tmp_path) -> No
     assert result.trace.steps[0].status == "error"
     assert result.trace.steps[0].error is not None
     assert result.trace.steps[0].error.type == "RuntimeError"
-    assert (tmp_path / f"{result.trace.run.id}.trace.json").exists()
+    _assert_trace_file_written(tmp_path, result.trace.run.id)
 
 
 def test_langgraph_adapter_invokes_graph_and_records_trace(tmp_path) -> None:
@@ -94,7 +104,7 @@ def test_langgraph_adapter_invokes_graph_and_records_trace(tmp_path) -> None:
     assert result.trace.steps[0].input == {"question": "weather"}
     assert result.trace.steps[0].output == {"messages": ["ok"], "question": "weather"}
     assert result.trace.steps[0].metadata["adapter_type"] == "langgraph"
-    assert (tmp_path / f"{result.trace.run.id}.trace.json").exists()
+    _assert_trace_file_written(tmp_path, result.trace.run.id)
 
 
 def test_langgraph_adapter_streams_node_updates_as_steps(tmp_path) -> None:
@@ -273,7 +283,7 @@ def test_openai_adapter_records_responses_create_and_cost(tmp_path) -> None:
     assert step.cost.output_tokens == 8
     assert step.cost.total_tokens == 20
     assert step.cost.amount_usd > 0
-    assert (tmp_path / f"{result.trace.run.id}.trace.json").exists()
+    _assert_trace_file_written(tmp_path, result.trace.run.id)
 
 
 def test_openai_adapter_can_expand_responses_output_items_as_child_steps(tmp_path) -> None:
@@ -545,7 +555,7 @@ def test_anthropic_adapter_records_messages_create_and_cost(tmp_path) -> None:
     assert step.cost.output_tokens == 6
     assert step.cost.total_tokens == 20
     assert step.cost.amount_usd > 0
-    assert (tmp_path / f"{result.trace.run.id}.trace.json").exists()
+    _assert_trace_file_written(tmp_path, result.trace.run.id)
 
 
 def test_anthropic_adapter_can_expand_content_blocks_as_child_steps(tmp_path) -> None:

@@ -162,7 +162,7 @@ agent-devtools otel-push traces\<trace-file>.trace.json --redact --endpoint http
 
 By default `store import`, `otel-export`, and `otel-push` run a privacy preflight and stop when sensitive values are detected. Use `--redact` to sanitize before writing or pushing, or `--allow-sensitive` only when you explicitly want to continue with the original trace. OTLP export/push also omits step input/output and tool args/results unless `--include-payloads` is provided.
 
-Security defaults: `replay-adapter` refuses to execute local Python callables unless `--allow-unsafe-code` is provided, and runs those callables in a child Python process so temporary import path changes do not affect the main CLI process. This is isolation, not a sandbox: only run trusted code. `otel-push` allows HTTPS and loopback HTTP by default; non-loopback HTTP and private/link-local endpoints require explicit `--allow-insecure-endpoint` and/or `--allow-private-endpoint`.
+Security defaults: `replay-adapter` refuses to execute local Python callables unless `--allow-unsafe-code` is provided, prints the callable file path and SHA-256 hash for file-based callables, and runs those callables in a child Python process so temporary import path changes do not affect the main CLI process. This is isolation, not a sandbox: only run trusted code. `otel-push` allows HTTPS and loopback HTTP by default; non-loopback HTTP and private/link-local endpoints require explicit `--allow-insecure-endpoint` and/or `--allow-private-endpoint`.
 
 Set this environment variable to make SDK writes redact automatically:
 

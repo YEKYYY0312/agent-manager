@@ -6,6 +6,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import socket
 import ssl
 from datetime import datetime, timezone
@@ -21,6 +22,18 @@ from .trace import Cost, Step, Trace
 DEFAULT_SERVICE_NAME = "agent-devtools"
 DEFAULT_OTLP_HTTP_ENDPOINT = "http://localhost:4318/v1/traces"
 SCOPE_NAME = "agent-devtools"
+HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
+DANGEROUS_HTTP_HEADERS = {
+    "connection",
+    "content-length",
+    "expect",
+    "host",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
 
 SPAN_KIND_INTERNAL = 1
 SPAN_KIND_CLIENT = 3
@@ -151,11 +164,11 @@ def push_trace_to_otlp_http(
         trace_to_otlp_json(trace, service_name=service_name, include_payloads=include_payloads),
         ensure_ascii=False,
     ).encode("utf-8")
-    merged_headers = {
+    merged_headers = _safe_http_headers({
         "Content-Type": "application/json",
         **_env_headers(),
         **(headers or {}),
-    }
+    })
     request = Request(target, data=payload, headers=merged_headers, method="POST")
     timeout = timeout_seconds if timeout_seconds is not None else _env_timeout_seconds()
     parsed = urlparse(target)
@@ -482,9 +495,20 @@ def _parse_headers(value: str) -> dict[str, str]:
             continue
         key, raw_value = part.split("=", 1)
         key = key.strip()
-        if key:
+        if _is_safe_http_header_name(key):
             headers[key] = raw_value.strip()
     return headers
+
+
+def _safe_http_headers(headers: dict[str, str]) -> dict[str, str]:
+    return {key: value for key, value in headers.items() if _is_safe_http_header_name(key)}
+
+
+def _is_safe_http_header_name(name: str) -> bool:
+    normalized = name.strip().lower()
+    if not normalized or normalized in DANGEROUS_HTTP_HEADERS:
+        return False
+    return bool(HEADER_NAME_RE.fullmatch(name.strip()))
 
 
 def _env_timeout_seconds() -> float:

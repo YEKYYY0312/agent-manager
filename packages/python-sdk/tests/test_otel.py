@@ -240,6 +240,27 @@ def test_push_trace_to_otlp_http_uses_env_endpoint_and_headers(monkeypatch) -> N
     assert request_headers["X-Trace"] == "two"
 
 
+def test_push_trace_to_otlp_http_filters_dangerous_headers(monkeypatch) -> None:
+    with _CaptureServer() as server:
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_HEADERS", "Host=evil.example,Content-Length=999,Transfer-Encoding=chunked,x-safe=ok")
+
+        result = push_trace_to_otlp_http(
+            _make_trace(),
+            endpoint=server.url,
+            headers={"host": "also-evil.example", "x-explicit": "yes"},
+            timeout_seconds=2,
+        )
+
+    assert result.ok is True
+    request_headers = server.requests[0]["headers"]
+    assert request_headers["X-Safe"] == "ok"
+    assert request_headers["X-Explicit"] == "yes"
+    assert request_headers["Host"] != "evil.example"
+    assert request_headers["Host"] != "also-evil.example"
+    assert request_headers["Content-Length"] != "999"
+    assert "Transfer-Encoding" not in request_headers
+
+
 def test_push_trace_to_otlp_http_raises_for_non_2xx() -> None:
     with _CaptureServer(status_code=503, response_body=b"collector down") as server:
         with pytest.raises(OtlpHttpExportError) as exc_info:

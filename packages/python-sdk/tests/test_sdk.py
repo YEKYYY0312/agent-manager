@@ -336,8 +336,24 @@ class TestTraceWriter:
             path = w.write(t)
 
             assert path.parent.resolve() == Path(tmp).resolve()
-            assert path.name == "escape.trace.json"
+            assert path.name.startswith("escape-")
+            assert path.name.endswith(".trace.json")
             assert path.exists()
+
+    def test_write_default_filename_includes_hash_to_avoid_sanitized_collisions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            w = TraceWriter(tmp)
+            first = new_run("first")
+            second = new_run("second")
+            first.run.id = "abc!def"
+            second.run.id = "abc@def"
+
+            first_path = w.write(first)
+            second_path = w.write(second)
+
+            assert first_path.name != second_path.name
+            assert first_path.exists()
+            assert second_path.exists()
 
     def test_write_rejects_filename_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -449,6 +465,38 @@ class TestTraceWriter:
             with pytest.raises(ValueError, match="maximum JSON depth"):
                 Trace.from_file(str(path))
 
+    def test_trace_from_dict_rejects_deeply_nested_json(self) -> None:
+        nested: object = 0
+        for _ in range(130):
+            nested = [nested]
+
+        with pytest.raises(ValueError, match="maximum JSON depth"):
+            Trace.from_dict(
+                {
+                    "schema_version": "0.1.0",
+                    "run": {"id": "r", "task": "t", "status": "success", "started_at": "2026-01-01T00:00:00Z"},
+                    "steps": [
+                        {
+                            "id": "s",
+                            "type": "custom",
+                            "name": "x",
+                            "status": "success",
+                            "started_at": "2026-01-01T00:00:00Z",
+                            "input": nested,
+                        }
+                    ],
+                }
+            )
+
+    def test_env_trace_limits_are_clamped_to_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agent_devtools.trace import DEFAULT_MAX_STEP_EVENTS, DEFAULT_MAX_TRACE_BYTES, _max_step_events, _max_trace_bytes
+
+        monkeypatch.setenv("AGENT_DEVTOOLS_MAX_TRACE_BYTES", str(DEFAULT_MAX_TRACE_BYTES * 1000))
+        monkeypatch.setenv("AGENT_DEVTOOLS_MAX_STEP_EVENTS", str(DEFAULT_MAX_STEP_EVENTS * 1000))
+
+        assert _max_trace_bytes(None) == DEFAULT_MAX_TRACE_BYTES
+        assert _max_step_events() == DEFAULT_MAX_STEP_EVENTS
+
     def test_rejects_invalid_run_fields(self) -> None:
         from agent_devtools.writer import _validate_structure
 
@@ -517,6 +565,19 @@ class TestTraceContext:
             assert data["run"]["status"] == "error"
             # Partial trace still has the planner step
             assert len(data["steps"]) == 1
+
+    def test_context_exception_final_output_does_not_store_exception_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                with TraceContext(task="will fail", output_dir=tmp):
+                    raise ValueError("token sk-live-secret123 leaked")
+            except ValueError:
+                pass
+
+            data = json.loads(next(Path(tmp).glob("*.trace.json")).read_text(encoding="utf-8"))
+            assert data["run"]["status"] == "error"
+            assert data["run"]["final_output"] == "Trace ended with ValueError"
+            assert "sk-live-secret123" not in json.dumps(data["run"], ensure_ascii=False)
 
     def test_model_call_convenience(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -676,8 +737,25 @@ class TestDecorators:
             assert step["output"]["reason"] == "serialized_payload_too_large"
             assert step["output"]["max_bytes"] == 64
             assert step["output"]["size_bytes"] > 64
+            assert "preview" not in step["output"]
             assert len(json.dumps(step["output"], ensure_ascii=False)) < 400
             assert step["tool"]["result"] == step["output"]
+
+    def test_traced_tool_truncation_does_not_preview_unrecognized_secret(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AGENT_DEVTOOLS_MAX_DECORATOR_PAYLOAD_BYTES", "64")
+        secret = "CUSTOMSECRET-unrecognized-value-" + ("x" * 200)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with TraceContext(task="test", output_dir=tmp):
+
+                @traced_tool("large.secret")
+                def large_tool() -> str:
+                    return secret
+
+                large_tool()
+
+            rendered = next(Path(tmp).glob("*.trace.json")).read_text(encoding="utf-8")
+            assert "CUSTOMSECRET-unrecognized-value" not in rendered
 
     def test_traced_step_captures_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

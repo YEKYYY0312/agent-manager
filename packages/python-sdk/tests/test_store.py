@@ -90,6 +90,19 @@ def test_trace_store_search_applies_limit() -> None:
     assert len(rows) == 2
 
 
+def test_trace_store_search_escapes_like_wildcards() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        store = TraceStore(Path(tmp) / "traces.db")
+        literal = _trace("Discount 100% confirmed")
+        wildcard_match = _trace("Discount 100x confirmed")
+        store.upsert_trace(literal)
+        store.upsert_trace(wildcard_match)
+
+        rows = store.search("100%")
+
+    assert [row.run_id for row in rows] == [literal.run.id]
+
+
 def test_trace_store_returns_none_for_missing_run() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         store = TraceStore(Path(tmp) / "traces.db")

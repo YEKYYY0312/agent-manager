@@ -389,6 +389,7 @@ class Trace:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Trace:
+        _validate_json_depth(data, DEFAULT_MAX_JSON_DEPTH)
         return cls(
             schema_version=data.get("schema_version", SCHEMA_VERSION),
             run=Run.from_dict(data.get("run", {})),
@@ -421,25 +422,24 @@ def new_run(task: str, labels: dict[str, str] | None = None) -> Trace:
 def _max_trace_bytes(override: int | None) -> int | None:
     if override is not None:
         return override
-    raw = os.getenv("AGENT_DEVTOOLS_MAX_TRACE_BYTES", "").strip()
-    if not raw:
-        return DEFAULT_MAX_TRACE_BYTES
-    try:
-        value = int(raw)
-    except ValueError:
-        return DEFAULT_MAX_TRACE_BYTES
-    return value if value > 0 else DEFAULT_MAX_TRACE_BYTES
+    return _bounded_env_int("AGENT_DEVTOOLS_MAX_TRACE_BYTES", DEFAULT_MAX_TRACE_BYTES, DEFAULT_MAX_TRACE_BYTES)
 
 
 def _max_step_events() -> int:
-    raw = os.getenv("AGENT_DEVTOOLS_MAX_STEP_EVENTS", "").strip()
+    return _bounded_env_int("AGENT_DEVTOOLS_MAX_STEP_EVENTS", DEFAULT_MAX_STEP_EVENTS, DEFAULT_MAX_STEP_EVENTS)
+
+
+def _bounded_env_int(name: str, default: int, maximum: int) -> int:
+    raw = os.getenv(name, "").strip()
     if not raw:
-        return DEFAULT_MAX_STEP_EVENTS
+        return default
     try:
         value = int(raw)
     except ValueError:
-        return DEFAULT_MAX_STEP_EVENTS
-    return value if value > 0 else DEFAULT_MAX_STEP_EVENTS
+        return default
+    if value <= 0:
+        return default
+    return min(value, maximum)
 
 
 def _validate_non_negative_int(name: str, value: Any) -> int:

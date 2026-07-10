@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -14,6 +15,7 @@ from typing import Any
 
 import pytest
 
+import agent_devtools_cli.main as cli_main
 from agent_devtools import Cost, Error, Step, ToolCall, Trace, TraceContext, new_run
 from agent_devtools_cli.main import (
     build_parser,
@@ -498,6 +500,8 @@ class TestReplayCommand:
             assert rc == 0
             out = capsys.readouterr().out
             assert "Adapter replay trace written" in out
+            assert f"Callable file: {module_path.resolve()}" in out
+            assert f"Callable sha256: {hashlib.sha256(module_path.read_bytes()).hexdigest()}" in out
             written = list(out_dir.glob("*.trace.json"))
             assert len(written) == 1
             replay_data = json.loads(written[0].read_text(encoding="utf-8"))
@@ -540,6 +544,39 @@ class TestReplayCommand:
             replay_data = json.loads(written[0].read_text(encoding="utf-8"))
             assert replay_data["steps"][0]["input"] == {"question": "override"}
             assert replay_data["steps"][0]["output"] == {"answer": "override"}
+
+    def test_replay_adapter_ignores_callable_stdout_pollution(self, capsys) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = _make_success_trace()
+            trace.steps[0].input = {"question": "weather"}
+            source = _write_trace(tmp, trace)
+            out_dir = Path(tmp) / "runtime-replays"
+            module_path = Path(tmp) / "noisy_agent.py"
+            module_path.write_text(
+                "print('module import noise')\n"
+                "def run(payload):\n"
+                "    print('runtime noise')\n"
+                "    return {'answer': payload['question']}\n",
+                encoding="utf-8",
+            )
+
+            rc = main([
+                "replay-adapter",
+                str(source),
+                "--start-step",
+                trace.steps[0].id,
+                "--callable",
+                f"{module_path}:run",
+                "--allow-unsafe-code",
+                "--output-dir",
+                str(out_dir),
+            ])
+
+            assert rc == 0
+            capsys.readouterr()
+            written = list(out_dir.glob("*.trace.json"))
+            replay_data = json.loads(written[0].read_text(encoding="utf-8"))
+            assert replay_data["steps"][0]["output"] == {"answer": "weather"}
 
     def test_replay_adapter_executes_callable_in_child_process(self, capsys) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1161,3 +1198,14 @@ class TestMain:
     def test_main_missing_command(self) -> None:
         with pytest.raises(SystemExit):
             main([])
+
+    def test_main_handles_keyboard_interrupt(self, monkeypatch, capsys) -> None:
+        def interrupt(args):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(cli_main, "command_list", interrupt)
+
+        rc = cli_main.main(["list"])
+
+        assert rc == 130
+        assert "Interrupted." in capsys.readouterr().err

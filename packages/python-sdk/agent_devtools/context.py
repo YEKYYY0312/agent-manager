@@ -70,7 +70,7 @@ class TraceContext:
         if exc_type is not None:
             self.trace.run.complete(
                 status=_exc_to_status(exc_type),
-                final_output=str(exc_val) if exc_val else None,
+                final_output=f"Trace ended with {exc_type.__name__}",
             )
         elif self.trace.run.ended_at is None:
             self.trace.run.complete(status="success")

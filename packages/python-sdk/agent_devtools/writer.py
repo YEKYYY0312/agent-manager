@@ -6,6 +6,7 @@ before writing so broken traces are caught early.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -77,7 +78,8 @@ class TraceWriter:
 def _safe_trace_filename(run_id: str) -> str:
     safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(run_id))
     safe_id = re.sub(r"\.{2,}", "_", safe_id).strip("._-")
-    return f"{safe_id or 'trace'}.trace.json"
+    digest = hashlib.sha256(str(run_id).encode("utf-8")).hexdigest()[:12]
+    return f"{safe_id or 'trace'}-{digest}.trace.json"
 
 
 def _resolve_output_file(output_dir: Path, filename: str) -> Path:
