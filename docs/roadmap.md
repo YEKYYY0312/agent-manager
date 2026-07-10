@@ -248,6 +248,15 @@
 - Gates cover status regression, failed-step increases, token, cost, latency, step-count thresholds, and optional output-change failure.
 - `--json` output added for CI artifacts and automated reporting.
 
+### Phase 12.16: Anthropic Tool-Use Loop
+
+- `AnthropicAdapter(tools=...)` added for local Claude tool-use loop execution.
+- Claude `tool_use` blocks are matched to trusted local Python callables by name.
+- Tool executions are recorded as `tool_call` steps with args, result, `anthropic_tool_use_id`, round, and index metadata.
+- Tool results are sent back to Claude as Anthropic-compatible `tool_result` messages until a final answer is returned.
+- Unknown tools and tool exceptions are recorded as error tool steps and returned to Claude as error `tool_result` messages.
+- `max_tool_rounds` prevents accidental infinite tool loops.
+
 ## Next
 
 ### Replay Execution Hardening
@@ -256,7 +265,7 @@
 
 ### Framework Adapters
 
-- Anthropic tool-use loop execution and streaming event expansion.
+- Anthropic streaming event expansion.
 - OpenAI Agents SDK tracing and streaming event expansion.
 - Claude Code/Codex trace import or execution bridge.
 - Broader CLI runtime replay for framework-specific adapters.

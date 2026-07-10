@@ -122,7 +122,17 @@ result = openai_adapter.run(task="Ask model", input="weather in Shanghai")
 
 anthropic_adapter = AnthropicAdapter(anthropic_client, model="claude-opus-4-8")
 result = anthropic_adapter.run(task="Ask Claude", input="weather in Shanghai")
+
+tool_loop_adapter = AnthropicAdapter(
+    anthropic_client,
+    model="claude-opus-4-8",
+    request_options={"tools": [weather_tool_schema]},
+    tools={"get_weather": get_weather},
+)
+result = tool_loop_adapter.run(task="Ask Claude with tools", input="weather in Shanghai")
 ```
+
+`AnthropicAdapter(tools=...)` runs Claude tool-use loops inside the SDK. Each `messages.create` call is recorded as a model step, each local tool implementation is recorded as a tool step, and the adapter sends Anthropic-compatible `tool_result` messages back to Claude until no more `tool_use` blocks are returned or `max_tool_rounds` is reached.
 
 The CLI `replay` command is still deterministic. For real local Python execution, `replay-adapter` runs only when the caller explicitly passes both `--callable` and `--allow-unsafe-code`:
 

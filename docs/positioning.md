@@ -35,6 +35,6 @@ This means the product should optimize for:
 
 ## Current Product Boundary
 
-The current product is a complete local MVP. It can record, inspect, analyze, diff, privacy-scan, redact, replay deterministically with optional edited tool mocks, execute explicit CLI callable adapter replay, compare original runs against replay runs, run adapter-based Python callable, LangGraph graph/node-level, OpenAI Responses/Chat, and Anthropic Messages replay, compare experiments, persist imported browser traces, index traces in SQLite, export OTLP JSON, and push OTLP HTTP JSON to a Collector endpoint.
+The current product is a complete local MVP. It can record, inspect, analyze, diff, privacy-scan, redact, replay deterministically with optional edited tool mocks, execute explicit CLI callable adapter replay, compare original runs against replay runs, run adapter-based Python callable, LangGraph graph/node-level, OpenAI Responses/Chat, Anthropic Messages, and Anthropic local tool-use-loop replay, compare experiments, persist imported browser traces, index traces in SQLite, export OTLP JSON, and push OTLP HTTP JSON to a Collector endpoint.
 
 Deeper framework-specific adapters are the next major boundary. They should remain optional adapters that keep the trace schema stable instead of turning the project into a framework-specific platform.

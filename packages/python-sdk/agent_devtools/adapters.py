@@ -71,6 +71,7 @@ class CallableAgentAdapter:
                     output = self.fn(input)
                     step.complete(status="success", output=output)
             except Exception as exc:
+                output = None
                 error = Error.from_exc(exc)
                 ctx.trace.run.complete(status=_status_for_exception(exc), final_output=error.message)
             else:
@@ -320,14 +321,20 @@ class AnthropicAdapter:
         request_options: dict[str, Any] | None = None,
         track_cost: bool = True,
         expand_content_blocks: bool = False,
+        tools: dict[str, Callable[..., Any]] | None = None,
+        max_tool_rounds: int = 4,
     ) -> None:
         _create_method(client, ["messages", "create"], endpoint="messages")
+        if max_tool_rounds < 0:
+            raise ValueError("max_tool_rounds must be greater than or equal to 0")
         self.client = client
         self.model = model
         self.name = name
         self.request_options = request_options or {}
         self.track_cost = track_cost
         self.expand_content_blocks = expand_content_blocks
+        self.tools = dict(tools) if tools is not None else None
+        self.max_tool_rounds = max_tool_rounds
 
     def run(
         self,
@@ -347,6 +354,9 @@ class AnthropicAdapter:
         effective_expand_content_blocks = self.expand_content_blocks if expand_content_blocks is None else expand_content_blocks
         if effective_expand_content_blocks:
             run_labels["anthropic_expand_content_blocks"] = "true"
+        tool_loop_enabled = self.tools is not None
+        if tool_loop_enabled:
+            run_labels["anthropic_tool_loop"] = "true"
 
         options = {"max_tokens": 16000}
         options.update(self.request_options)
@@ -354,38 +364,70 @@ class AnthropicAdapter:
             options.update(request_options)
 
         messages = _anthropic_messages(input)
-        step_input = {"messages": deepcopy(messages)}
 
         with TraceContext(task=task, labels=run_labels, output_dir=output_dir) as ctx:
             output = None
             error = None
             try:
-                with ctx.step(
-                    "model_call",
-                    f"{self.name}.messages.create",
-                    input=step_input,
-                    model=self.model,
-                    replayable=False,
-                ) as step:
-                    step.metadata["adapter"] = self.name
-                    step.metadata["adapter_type"] = "anthropic"
-                    step.metadata["anthropic_endpoint"] = "messages"
-                    response = self._create(messages=messages, options=options)
-                    output = _anthropic_output(response)
-                    message_id = _value(response, "id")
-                    request_id = _value(response, "_request_id")
-                    stop_reason = _value(response, "stop_reason")
-                    if message_id:
-                        step.metadata["anthropic_message_id"] = message_id
-                    if request_id:
-                        step.metadata["anthropic_request_id"] = request_id
-                    if stop_reason:
-                        step.metadata["anthropic_stop_reason"] = stop_reason
-                    cost = _anthropic_cost(response, model=self.model) if self.track_cost else None
-                    step.complete(status="success", output=output, cost=cost)
-                    if effective_expand_content_blocks:
-                        _record_anthropic_content_blocks(ctx, adapter_name=self.name, response=response)
+                for tool_round in range(self.max_tool_rounds + 1):
+                    response = None
+                    with ctx.step(
+                        "model_call",
+                        f"{self.name}.messages.create",
+                        input={"messages": deepcopy(messages)},
+                        model=self.model,
+                        replayable=False,
+                    ) as step:
+                        step.metadata["adapter"] = self.name
+                        step.metadata["adapter_type"] = "anthropic"
+                        step.metadata["anthropic_endpoint"] = "messages"
+                        if tool_loop_enabled:
+                            step.metadata["anthropic_tool_round"] = tool_round
+                        response = self._create(messages=messages, options=options)
+                        output = _anthropic_output(response)
+                        message_id = _value(response, "id")
+                        request_id = _value(response, "_request_id")
+                        stop_reason = _value(response, "stop_reason")
+                        if message_id:
+                            step.metadata["anthropic_message_id"] = message_id
+                        if request_id:
+                            step.metadata["anthropic_request_id"] = request_id
+                        if stop_reason:
+                            step.metadata["anthropic_stop_reason"] = stop_reason
+                        cost = _anthropic_cost(response, model=self.model) if self.track_cost else None
+                        step.complete(status="success", output=output, cost=cost)
+                        if effective_expand_content_blocks:
+                            _record_anthropic_content_blocks(ctx, adapter_name=self.name, response=response)
+
+                    tool_uses = _anthropic_tool_use_blocks(response)
+                    if not tool_loop_enabled or not tool_uses:
+                        break
+                    if tool_round >= self.max_tool_rounds:
+                        raise RuntimeError(f"Anthropic tool loop exceeded max_tool_rounds={self.max_tool_rounds}")
+
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": _anthropic_message_content(response),
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": [
+                                self._execute_tool_use(
+                                    ctx=ctx,
+                                    block=tool_use,
+                                    parent_id=step.id,
+                                    tool_round=tool_round,
+                                    tool_index=tool_index,
+                                )
+                                for tool_index, tool_use in enumerate(tool_uses)
+                            ],
+                        }
+                    )
             except Exception as exc:
+                output = None
                 error = Error.from_exc(exc)
                 ctx.trace.run.complete(status=_status_for_exception(exc), final_output=error.message)
             else:
@@ -395,7 +437,63 @@ class AnthropicAdapter:
 
     def _create(self, messages: list[dict[str, Any]], options: dict[str, Any]) -> Any:
         create = _create_method(self.client, ["messages", "create"], endpoint="messages")
-        return create(model=self.model, messages=messages, **options)
+        return create(model=self.model, messages=deepcopy(messages), **options)
+
+    def _execute_tool_use(
+        self,
+        *,
+        ctx: TraceContext,
+        block: Any,
+        parent_id: str,
+        tool_round: int,
+        tool_index: int,
+    ) -> dict[str, Any]:
+        tool_name = _anthropic_block_tool_name(block, "tool_use")
+        tool_use_id = str(_value(block, "id") or "")
+        args = _to_serializable(_value(block, "input"))
+        tools = self.tools or {}
+
+        with ctx.step("tool_call", f"{self.name}.{tool_name}", input=args, replayable=False, parent_id=parent_id) as step:
+            step.metadata["adapter"] = self.name
+            step.metadata["adapter_type"] = "anthropic"
+            step.metadata["anthropic_tool_loop"] = True
+            step.metadata["anthropic_tool_round"] = tool_round
+            step.metadata["anthropic_tool_index"] = tool_index
+            step.metadata["anthropic_tool_use_id"] = tool_use_id
+            step.tool = ToolCall(name=tool_name, args=args)
+
+            fn = tools.get(tool_name)
+            if fn is None:
+                err = Error(message=f"Unknown Anthropic tool: {tool_name}", type="UnknownAnthropicTool")
+                step.complete(status="error", output=err.message, error=err)
+                step.tool.result = err.message
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": err.message,
+                    "is_error": True,
+                }
+
+            try:
+                result = _call_anthropic_tool(fn, args)
+            except Exception as exc:
+                err = Error.from_exc(exc)
+                step.complete(status=_status_for_exception(exc), output=err.message, error=err)
+                step.tool.result = err.message
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": err.message,
+                    "is_error": True,
+                }
+
+            step.complete(status="success", output=result)
+            step.tool.result = result
+            return {
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": _anthropic_tool_result_content(result),
+            }
 
 
 def _callable_name(fn: Callable[[Any], Any]) -> str:
@@ -792,6 +890,41 @@ def _anthropic_content_blocks(response: Any) -> list[Any]:
     return []
 
 
+def _anthropic_tool_use_blocks(response: Any) -> list[Any]:
+    return [
+        block
+        for block in _anthropic_content_blocks(response)
+        if str(_value(block, "type") or "") in {"tool_use", "server_tool_use"}
+    ]
+
+
+def _anthropic_message_content(response: Any) -> list[Any]:
+    return [_anthropic_content_block_message_value(block) for block in _anthropic_content_blocks(response)]
+
+
+def _anthropic_content_block_message_value(block: Any) -> Any:
+    dumped = _model_dump(block)
+    if isinstance(dumped, dict):
+        return dumped
+    if isinstance(block, dict):
+        return deepcopy(block)
+
+    keys = [
+        "id",
+        "input",
+        "name",
+        "type",
+        "text",
+        "thinking",
+        "data",
+        "signature",
+        "content",
+        "citations",
+    ]
+    value = {key: _to_serializable(_value(block, key)) for key in keys if _value(block, key) is not None}
+    return value if value else _to_serializable(block)
+
+
 def _anthropic_block_step_type(block_type: str) -> str:
     if block_type in {"tool_use", "server_tool_use"} or block_type.endswith("_tool_use"):
         return "tool_call"
@@ -843,6 +976,18 @@ def _block_to_value(block: Any) -> Any:
     if isinstance(block, (dict, list, str, int, float, bool, type(None))):
         return deepcopy(block)
     return str(block)
+
+
+def _call_anthropic_tool(fn: Callable[..., Any], args: Any) -> Any:
+    if isinstance(args, dict):
+        return fn(**args)
+    return fn(args)
+
+
+def _anthropic_tool_result_content(result: Any) -> str:
+    if isinstance(result, str):
+        return result
+    return json.dumps(_to_serializable(result), ensure_ascii=False)
 
 
 def _value(obj: Any, key: str) -> Any:

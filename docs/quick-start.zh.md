@@ -130,6 +130,30 @@ anthropic_result = anthropic_adapter.run(task="Ask Claude", input="weather in Sh
 # 如果想把 Claude Messages content block 展开成子 step：
 anthropic_expanded = AnthropicAdapter(anthropic_client, model="claude-opus-4-8", expand_content_blocks=True)
 anthropic_expanded_result = anthropic_expanded.run(task="Ask Claude", input="weather in Shanghai")
+
+# 如果想让 Claude tool_use 调用本地 Python 工具并继续生成最终答案：
+def get_weather(city: str) -> dict[str, str]:
+    return {"summary": f"{city}: cool and windy"}
+
+anthropic_tools = AnthropicAdapter(
+    anthropic_client,
+    model="claude-opus-4-8",
+    request_options={
+        "tools": [
+            {
+                "name": "get_weather",
+                "description": "Get weather for a city.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            }
+        ]
+    },
+    tools={"get_weather": get_weather},
+)
+anthropic_tools_result = anthropic_tools.run(task="Ask Claude with tools", input="weather in Shanghai")
 ```
 
 对比两次运行：
@@ -260,7 +284,7 @@ http://127.0.0.1:5173/
 - SDK 已有通用 `CallableAgentAdapter`，可以调用真实 Python callable 生成新 trace。
 - SDK 已有 `LangGraphAdapter`，可以调用编译后的 LangGraph graph 的 `invoke`；打开 `trace_stream=True` 后，也可以把每个 LangGraph node update 展开成单独 step。
 - SDK 已有 `OpenAIAdapter`，支持 Responses API 和 Chat Completions，并会把 usage 映射成费用信息；设置 `expand_output_items=True` 后，可以把 Responses output item 展开成子 step。
-- SDK 已有 `AnthropicAdapter`，支持 Claude Messages API，并会把 usage 映射成费用信息；设置 `expand_content_blocks=True` 后，可以把 content block 展开成子 step。
+- SDK 已有 `AnthropicAdapter`，支持 Claude Messages API，并会把 usage 映射成费用信息；设置 `expand_content_blocks=True` 后，可以把 content block 展开成子 step；传入 `tools={...}` 后，可以执行 Claude `tool_use` 请求里的本地 Python 工具，并把每轮模型调用和工具调用记录进 trace。
 - 已有 OTLP JSON 文件导出，也可以直接推送到 OpenTelemetry Collector HTTP endpoint。
 - 已有隐私扫描和自动脱敏开关，但如果你手动把密钥写进不常见字段，仍建议分享前跑一次 `privacy-scan`。
 - Claude Code/Codex 的专用适配器还没实现。

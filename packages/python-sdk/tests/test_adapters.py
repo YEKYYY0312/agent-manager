@@ -601,6 +601,214 @@ def test_anthropic_adapter_can_expand_content_blocks_as_child_steps(tmp_path) ->
     assert result.trace.run.labels["anthropic_expand_content_blocks"] == "true"
 
 
+def test_anthropic_adapter_executes_tool_use_loop(tmp_path) -> None:
+    class Usage:
+        input_tokens = 10
+        output_tokens = 5
+
+    class ToolUseBlock:
+        id = "toolu_1"
+        type = "tool_use"
+        name = "get_weather"
+        input = {"city": "Shanghai"}
+
+    class TextBlock:
+        type = "text"
+        text = "It is cool and windy."
+
+    class ToolResponse:
+        id = "msg_tool"
+        content = [ToolUseBlock()]
+        usage = Usage()
+        stop_reason = "tool_use"
+
+    class FinalResponse:
+        id = "msg_final"
+        content = [TextBlock()]
+        usage = Usage()
+        stop_reason = "end_turn"
+
+    class Messages:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return ToolResponse() if len(self.calls) == 1 else FinalResponse()
+
+    class Client:
+        def __init__(self) -> None:
+            self.messages = Messages()
+
+    def get_weather(city: str) -> dict[str, str]:
+        return {"summary": f"{city}: cool and windy"}
+
+    client = Client()
+    adapter = AnthropicAdapter(
+        client,
+        model="claude-opus-4-8",
+        name="claude-weather",
+        tools={"get_weather": get_weather},
+        request_options={
+            "tools": [
+                {
+                    "name": "get_weather",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                }
+            ]
+        },
+    )
+
+    result = adapter.run(task="Ask Claude with tool loop", input="weather", output_dir=str(tmp_path))
+
+    assert result.error is None
+    assert result.output == "It is cool and windy."
+    assert len(client.messages.calls) == 2
+    assert client.messages.calls[0]["messages"] == [{"role": "user", "content": "weather"}]
+    assert client.messages.calls[1]["messages"] == [
+        {"role": "user", "content": "weather"},
+        {"role": "assistant", "content": [{"id": "toolu_1", "input": {"city": "Shanghai"}, "name": "get_weather", "type": "tool_use"}]},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": '{"summary": "Shanghai: cool and windy"}',
+                }
+            ],
+        },
+    ]
+    assert [step.name for step in result.trace.steps] == [
+        "claude-weather.messages.create",
+        "claude-weather.get_weather",
+        "claude-weather.messages.create",
+    ]
+    tool_step = result.trace.steps[1]
+    assert tool_step.type == "tool_call"
+    assert tool_step.tool is not None
+    assert tool_step.tool.name == "get_weather"
+    assert tool_step.tool.args == {"city": "Shanghai"}
+    assert tool_step.tool.result == {"summary": "Shanghai: cool and windy"}
+    assert tool_step.metadata["anthropic_tool_use_id"] == "toolu_1"
+    assert result.trace.run.labels["anthropic_tool_loop"] == "true"
+
+
+def test_anthropic_adapter_records_unknown_tool_result_error(tmp_path) -> None:
+    class ToolUseBlock:
+        id = "toolu_missing"
+        type = "tool_use"
+        name = "missing_tool"
+        input = {"city": "Shanghai"}
+
+    class TextBlock:
+        type = "text"
+        text = "I could not call that tool."
+
+    class ToolResponse:
+        content = [ToolUseBlock()]
+        stop_reason = "tool_use"
+
+    class FinalResponse:
+        content = [TextBlock()]
+        stop_reason = "end_turn"
+
+    class Messages:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return ToolResponse() if len(self.calls) == 1 else FinalResponse()
+
+    class Client:
+        def __init__(self) -> None:
+            self.messages = Messages()
+
+    client = Client()
+    adapter = AnthropicAdapter(
+        client,
+        model="claude-opus-4-8",
+        name="claude-weather",
+        tools={},
+    )
+
+    result = adapter.run(task="Ask Claude with missing tool", input="weather", output_dir=str(tmp_path))
+
+    assert result.error is None
+    assert result.output == "I could not call that tool."
+    tool_step = result.trace.steps[1]
+    assert tool_step.status == "error"
+    assert tool_step.error is not None
+    assert tool_step.error.type == "UnknownAnthropicTool"
+    assert "missing_tool" in tool_step.error.message
+    assert client.messages.calls[1]["messages"][-1] == {
+        "role": "user",
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_missing",
+                "content": "Unknown Anthropic tool: missing_tool",
+                "is_error": True,
+            }
+        ],
+    }
+
+
+def test_anthropic_adapter_stops_after_max_tool_rounds(tmp_path) -> None:
+    class ToolUseBlock:
+        id = "toolu_loop"
+        type = "tool_use"
+        name = "get_weather"
+        input = {"city": "Shanghai"}
+
+    class ToolResponse:
+        content = [ToolUseBlock()]
+        stop_reason = "tool_use"
+
+    class Messages:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return ToolResponse()
+
+    class Client:
+        def __init__(self) -> None:
+            self.messages = Messages()
+
+    def get_weather(city: str) -> str:
+        return f"{city}: still looping"
+
+    client = Client()
+    adapter = AnthropicAdapter(
+        client,
+        model="claude-opus-4-8",
+        name="claude-weather",
+        tools={"get_weather": get_weather},
+        max_tool_rounds=1,
+    )
+
+    result = adapter.run(task="Ask Claude with looping tool", input="weather", output_dir=str(tmp_path))
+
+    assert result.output is None
+    assert result.error is not None
+    assert result.error.type == "RuntimeError"
+    assert "max_tool_rounds=1" in result.error.message
+    assert result.trace.run.status == "error"
+    assert len(client.messages.calls) == 2
+    assert [step.name for step in result.trace.steps] == [
+        "claude-weather.messages.create",
+        "claude-weather.get_weather",
+        "claude-weather.messages.create",
+    ]
+
+
 def test_anthropic_adapter_accepts_existing_messages_input(tmp_path) -> None:
     class Usage:
         input_tokens = 5

@@ -199,7 +199,40 @@ adapter = AnthropicAdapter(
 
 When enabled, the main `messages.create` step remains in the trace. `text` blocks are recorded as `model_call` child steps, `thinking` blocks as `planner` child steps, and `tool_use` blocks as `tool_call` child steps with `tool.args` populated from the structured tool input.
 
-The adapter records a `model_call` step and maps `response.usage` into `Cost` when token usage is available. It extracts text from `response.content` text blocks. Tool-use loop execution and streaming event expansion are planned follow-ups.
+To let Claude execute local tools and continue until a final answer, pass a `tools` mapping. The tool schema still belongs in Anthropic `request_options["tools"]`; the `tools` mapping is the local Python implementation that Agent DevTools calls when Claude returns `tool_use` blocks.
+
+```python
+def get_weather(city: str) -> dict[str, str]:
+    return {"summary": f"{city}: cool and windy"}
+
+
+adapter = AnthropicAdapter(
+    client,
+    model="claude-opus-4-8",
+    name="claude-weather",
+    request_options={
+        "tools": [
+            {
+                "name": "get_weather",
+                "description": "Get the current weather for a city.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            }
+        ]
+    },
+    tools={"get_weather": get_weather},
+    max_tool_rounds=4,
+)
+
+result = adapter.run(task="Ask Claude with tools", input="weather in Shanghai")
+```
+
+Each `messages.create` request is recorded as a `model_call` step. Each local tool execution is recorded as a `tool_call` step with `tool.args`, `tool.result`, `anthropic_tool_use_id`, and tool round metadata. Unknown tools and tool exceptions are returned to Claude as error `tool_result` messages and are marked as error tool steps in the trace; the overall run can still finish successfully if Claude recovers.
+
+The adapter records a `model_call` step and maps `response.usage` into `Cost` when token usage is available. It extracts text from `response.content` text blocks. Streaming event expansion is a planned follow-up.
 
 ## Adapter Replay
 
@@ -255,7 +288,7 @@ Specific adapters should stay optional and preserve the same contract:
 
 - LangGraph: graph-level `invoke` and node-level streaming update traces are implemented.
 - OpenAI SDK: Responses API and Chat Completions adapters are implemented; Responses output item expansion is implemented; Agents SDK tracing and streaming event expansion are planned.
-- Anthropic SDK: Messages API adapter and content block expansion are implemented; tool-use loop execution and streaming event expansion are planned.
+- Anthropic SDK: Messages API adapter, content block expansion, and local tool-use loop execution are implemented; streaming event expansion is planned.
 - Claude Code/Codex: import or bridge local execution logs into trace runs where possible.
 
 These adapters should not make the core package depend on those frameworks by default.
