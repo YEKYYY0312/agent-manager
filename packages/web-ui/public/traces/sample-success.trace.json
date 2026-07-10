@@ -1,0 +1,85 @@
+{
+  "schema_version": "0.1.0",
+  "run": {
+    "id": "c83eb5a60551",
+    "task": "Find the current weather summary for Shanghai and produce a short answer.",
+    "status": "success",
+    "started_at": "2026-07-06T00:16:36.330962Z",
+    "ended_at": "2026-07-06T00:16:36.422561Z",
+    "duration_ms": 91.599,
+    "labels": {
+      "scenario": "success",
+      "city": "shanghai"
+    },
+    "final_output": "The weather is: Warm and humid, chance of rain, 28°C"
+  },
+  "steps": [
+    {
+      "id": "f0a473e55e8b",
+      "type": "planner",
+      "name": "Create answer plan",
+      "status": "success",
+      "started_at": "2026-07-06T00:16:36.331371Z",
+      "ended_at": "2026-07-06T00:16:36.341717Z",
+      "duration_ms": 10.318100001313724,
+      "input": "What's the weather in Shanghai?",
+      "output": "Call weather tool, then summarize result.",
+      "replayable": true
+    },
+    {
+      "id": "9b93e18d64e8",
+      "type": "tool_call",
+      "name": "weather.lookup",
+      "status": "success",
+      "started_at": "2026-07-06T00:16:36.341800Z",
+      "ended_at": "2026-07-06T00:16:36.392270Z",
+      "duration_ms": 50.47,
+      "input": {
+        "city": "Shanghai"
+      },
+      "output": {
+        "city": "Shanghai",
+        "summary": "Warm and humid, chance of rain, 28°C"
+      },
+      "tool": {
+        "name": "weather.lookup",
+        "args": {
+          "city": "Shanghai"
+        },
+        "result": {
+          "city": "Shanghai",
+          "summary": "Warm and humid, chance of rain, 28°C"
+        }
+      },
+      "replayable": true
+    },
+    {
+      "id": "b3156ae0c976",
+      "type": "model_call",
+      "name": "Generate final answer",
+      "status": "success",
+      "started_at": "2026-07-06T00:16:36.392373Z",
+      "ended_at": "2026-07-06T00:16:36.422539Z",
+      "duration_ms": 30.120900002657436,
+      "model": "gpt-4.1-mini",
+      "input": {
+        "weather_summary": "Warm and humid, chance of rain, 28°C"
+      },
+      "output": {
+        "content": "The weather is: Warm and humid, chance of rain, 28°C",
+        "usage": {
+          "prompt_tokens": 420,
+          "completion_tokens": 36,
+          "total_tokens": 456
+        }
+      },
+      "cost": {
+        "input_tokens": 420,
+        "output_tokens": 36,
+        "total_tokens": 456,
+        "amount_usd": 3.12e-05
+      },
+      "replayable": true
+    }
+  ]
+}

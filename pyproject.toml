@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-devtools-local"
+version = "0.1.0"
+description = "Local-first DevTools for recording, inspecting, replaying, and comparing AI agent traces."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Agent DevTools contributors" },
+]
+keywords = ["ai", "agents", "observability", "tracing", "debugging", "local-first"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Software Development :: Debuggers",
+]
+dependencies = []
+
+[project.scripts]
+agent-devtools = "agent_devtools_cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["packages/python-sdk", "packages/cli"]
+include = ["agent_devtools*", "agent_devtools_cli*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["packages/python-sdk", "packages/cli"]
+testpaths = ["packages/python-sdk/tests", "packages/cli/tests"]

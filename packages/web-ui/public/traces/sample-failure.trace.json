@@ -1,0 +1,53 @@
+{
+  "schema_version": "0.1.0",
+  "run": {
+    "id": "effc21a17648",
+    "task": "Find the current weather summary for UnknownCity and produce a short answer.",
+    "status": "error",
+    "started_at": "2026-07-06T00:16:36.423721Z",
+    "ended_at": "2026-07-06T00:16:36.484567Z",
+    "duration_ms": 60.846,
+    "labels": {
+      "scenario": "failure",
+      "city": "unknowncity"
+    }
+  },
+  "steps": [
+    {
+      "id": "ceae82e355ee",
+      "type": "planner",
+      "name": "Create answer plan",
+      "status": "success",
+      "started_at": "2026-07-06T00:16:36.424068Z",
+      "ended_at": "2026-07-06T00:16:36.434381Z",
+      "duration_ms": 10.295600004610606,
+      "input": "What's the weather in UnknownCity?",
+      "output": "Call weather tool, then summarize result.",
+      "replayable": true
+    },
+    {
+      "id": "4573ae1736d9",
+      "type": "tool_call",
+      "name": "weather.lookup",
+      "status": "timeout",
+      "started_at": "2026-07-06T00:16:36.434445Z",
+      "ended_at": "2026-07-06T00:16:36.484534Z",
+      "duration_ms": 50.089,
+      "input": {
+        "city": "UnknownCity"
+      },
+      "tool": {
+        "name": "weather.lookup",
+        "args": {
+          "city": "UnknownCity"
+        },
+        "result": null
+      },
+      "error": {
+        "message": "weather.lookup timed out for 'UnknownCity' after 7s",
+        "type": "ToolTimeout"
+      },
+      "replayable": true
+    }
+  ]
+}

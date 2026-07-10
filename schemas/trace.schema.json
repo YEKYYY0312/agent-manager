@@ -1,0 +1,107 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-devtools.local/schemas/trace.schema.json",
+  "title": "Agent DevTools Trace",
+  "type": "object",
+  "required": ["schema_version", "run", "steps"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "run": {
+      "type": "object",
+      "required": ["id", "task", "status", "started_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "task": { "type": "string" },
+        "status": { "$ref": "#/$defs/status" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "ended_at": { "type": ["string", "null"], "format": "date-time" },
+        "duration_ms": { "type": ["number", "null"], "minimum": 0 },
+        "labels": { "type": "object", "additionalProperties": { "type": "string" } },
+        "final_output": {},
+        "cost": { "$ref": "#/$defs/cost" }
+      },
+      "additionalProperties": true
+    },
+    "steps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "status": {
+      "type": "string",
+      "enum": ["success", "error", "cancelled", "timeout"]
+    },
+    "step_type": {
+      "type": "string",
+      "enum": ["model_call", "tool_call", "retrieval", "memory", "planner", "control", "custom"]
+    },
+    "cost": {
+      "type": "object",
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "total_tokens": { "type": "integer", "minimum": 0 },
+        "amount_usd": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "error": {
+      "type": "object",
+      "required": ["message"],
+      "properties": {
+        "type": { "type": "string" },
+        "message": { "type": "string" },
+        "stack": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "event": {
+      "type": "object",
+      "required": ["timestamp", "type"],
+      "properties": {
+        "timestamp": { "type": "string", "format": "date-time" },
+        "type": { "type": "string" },
+        "message": { "type": "string" },
+        "data": {}
+      },
+      "additionalProperties": true
+    },
+    "step": {
+      "type": "object",
+      "required": ["id", "type", "name", "status", "started_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "parent_id": { "type": ["string", "null"] },
+        "type": { "$ref": "#/$defs/step_type" },
+        "name": { "type": "string" },
+        "status": { "$ref": "#/$defs/status" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "ended_at": { "type": ["string", "null"], "format": "date-time" },
+        "duration_ms": { "type": ["number", "null"], "minimum": 0 },
+        "model": { "type": "string" },
+        "input": {},
+        "output": {},
+        "tool": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "args": {},
+            "result": {}
+          },
+          "additionalProperties": true
+        },
+        "cost": { "$ref": "#/$defs/cost" },
+        "error": { "$ref": "#/$defs/error" },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/event" }
+        },
+        "replayable": { "type": "boolean" },
+        "metadata": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,807 @@
+{
+  "$schema": "./answer_quality_cases.schema.json",
+  "description": "Agent DevTools 问答质量评估用例集。用于评测 AI 助手对 Agent 可观测性/追踪产品的业务问答能力。",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "aq001",
+      "category": "product_usage",
+      "difficulty": "easy",
+      "question": "Agent DevTools 是什么？它能帮我解决什么问题？",
+      "tags": ["入门", "产品介绍"],
+      "expected_key_points": [
+        "AI Agent 可观测性/追踪平台",
+        "记录每次 Agent 运行的完整调用链（trace）",
+        "提供 cost/latency/failure/loop/retry 分析",
+        "支持 Web UI 时间线可视化和运行 diff 对比",
+        "Python SDK + CLI + Web UI 三件套"
+      ],
+      "bad_answer_patterns": [
+        "只说是一个工具但没有说明具体功能",
+        "没有提到可观测性/追踪的定位"
+      ]
+    },
+    {
+      "id": "aq002",
+      "category": "product_usage",
+      "difficulty": "easy",
+      "question": "我该怎么开始使用 Agent DevTools 追踪我的 Agent？",
+      "tags": ["入门", "SDK", "集成"],
+      "expected_key_points": [
+        "安装 Python SDK：pip install agent-devtools",
+        "用 new_run() 创建 trace",
+        "用 add_step() 记录每一步",
+        "step.complete() 标记步骤结束",
+        "trace.to_dict() 序列化为 JSON 保存"
+      ],
+      "bad_answer_patterns": [
+        "只讲概念没有给代码示例",
+        "没有说明 new_run → add_step → complete 的完整流程"
+      ]
+    },
+    {
+      "id": "aq003",
+      "category": "analysis",
+      "difficulty": "medium",
+      "question": "我的 Agent 运行了一次任务花了 $2.3，怎么分析哪些步骤最烧钱？",
+      "tags": ["cost", "分析", "优化"],
+      "expected_key_points": [
+        "使用 analyze_cost() 函数",
+        "返回 CostAnalysis 包含 by_model 和 by_step_type 分组",
+        "most_expensive 列出 top-5 最贵步骤",
+        "可以按模型和步骤类型分别看花费",
+        "结合输出判断是否有模型调用次数过多或 token 浪费"
+      ],
+      "bad_answer_patterns": [
+        "只说看总花费没有讲分组分析",
+        "没有提到 most_expensive 排序"
+      ]
+    },
+    {
+      "id": "aq004",
+      "category": "debugging",
+      "difficulty": "medium",
+      "question": "我的 Agent 跑着跑着就报错了，怎么看是哪个步骤出了问题？",
+      "tags": ["failure", "调试", "错误排查"],
+      "expected_key_points": [
+        "使用 analyze_failures() 函数",
+        "返回 FailureAnalysis 包含 failed_steps 列表",
+        "每个 FailurePoint 有 error_type/error_message/position",
+        "可以通过 step.position 定位到 trace 中的位置",
+        "failure_rate 给出整体失败率"
+      ],
+      "bad_answer_patterns": [
+        "没有提到 FailurePoint 中的 error_type 和 error_message",
+        "没有说明如何定位失败步骤在 trace 中的位置"
+      ]
+    },
+    {
+      "id": "aq005",
+      "category": "analysis",
+      "difficulty": "medium",
+      "question": "我发现 Agent 有时候会重复调用同一个工具很多次，怎么检测这种情况？",
+      "tags": ["loop", "分析", "重复调用"],
+      "expected_key_points": [
+        "使用 detect_loops() 函数",
+        "默认 threshold=3，即连续 3 次以上同名同类型步骤视为可疑循环",
+        "返回 LoopAnalysis 含 LoopCandidate（step_name, count, first_index, last_index）",
+        "可以调整 threshold 参数控制敏感度",
+        "has_suspicious_loops 快速判断是否存在循环"
+      ],
+      "bad_answer_patterns": [
+        "没有提到 threshold 参数的作用",
+        "混淆了 loop 和 retry 的概念"
+      ]
+    },
+    {
+      "id": "aq006",
+      "category": "analysis",
+      "difficulty": "medium",
+      "question": "Agent 的某个步骤失败后自动重试了，我怎么能看到重试了几次、最终有没有成功？",
+      "tags": ["retry", "分析", "重试"],
+      "expected_key_points": [
+        "使用 detect_retries() 函数",
+        "返回 RetryAnalysis 含 RetryCandidate 列表",
+        "每个 RetryCandidate 有 attempts（重试次数）、succeeded（最终是否成功）",
+        "重试检测原理：同名步骤中前序失败后续重试",
+        "total_retry_chains 给出总重试链条数"
+      ],
+      "bad_answer_patterns": [
+        "没有区分 loop（连续重复）和 retry（失败后重试）",
+        "没有提到 succeeded 字段表示最终结果"
+      ]
+    },
+    {
+      "id": "aq007",
+      "category": "analysis",
+      "difficulty": "easy",
+      "question": "我想一次性拿到所有分析结果（cost、延迟、失败、循环、重试），有快捷方式吗？",
+      "tags": ["analyze", "综合", "report"],
+      "expected_key_points": [
+        "使用 analyze() 函数，它是所有分析器的统一入口",
+        "返回 TraceReport 包含 cost/latency/failure/loops/retries 五个子报告",
+        "summary 字段给出可读的一句话摘要",
+        "一次调用即可拿到全部分析维度"
+      ],
+      "bad_answer_patterns": [
+        "让用户分别调用五个函数而不是推荐 analyze()"
+      ]
+    },
+    {
+      "id": "aq008",
+      "category": "product_usage",
+      "difficulty": "medium",
+      "question": "我有两次 Agent 运行想对比一下差异，Agent DevTools 能做到吗？",
+      "tags": ["diff", "对比", "实验"],
+      "expected_key_points": [
+        "Web UI 中有 DiffView / ExperimentView",
+        "可以对比两次运行的步骤差异、cost 差异、耗时差异",
+        "多次运行对比有助于评估 prompt 修改效果",
+        "使用 labels 给 run 打标签方便后续筛选对比"
+      ],
+      "bad_answer_patterns": [
+        "没有提到 labels 标签的作用",
+        "只说可以做但没有说明具体对比维度"
+      ]
+    },
+    {
+      "id": "aq009",
+      "category": "cli",
+      "difficulty": "easy",
+      "question": "CLI 工具有哪些命令？怎么查看最近的 trace？",
+      "tags": ["CLI", "命令", "trace"],
+      "expected_key_points": [
+        "trace list — 列出所有 trace",
+        "trace show <id> — 查看某个 trace 详情",
+        "trace inspect <id> — 逐步检查",
+        "trace cost <id> — 查看花费",
+        "trace diff <id1> <id2> — 对比两次运行"
+      ],
+      "bad_answer_patterns": [
+        "没有给出具体命令名称",
+        "只说有 CLI 但不列命令"
+      ]
+    },
+    {
+      "id": "aq010",
+      "category": "integration",
+      "difficulty": "hard",
+      "question": "我的 Agent 是用 LangChain 写的，怎么把 Agent DevTools 集成进去？",
+      "tags": ["LangChain", "集成", "回调"],
+      "expected_key_points": [
+        "可以在 LangChain callback handler 中调用 Agent DevTools SDK",
+        "在 on_llm_start/on_llm_end 中记录 model_call 步骤",
+        "在 on_tool_start/on_tool_end 中记录 tool_call 步骤",
+        "每个 callback 事件对应 add_step + complete",
+        "最终序列化整个 trace 保存为 .trace.json"
+      ],
+      "bad_answer_patterns": [
+        "没有给出 LangChain callback 事件与 trace step 的映射关系"
+      ]
+    },
+    {
+      "id": "aq011",
+      "category": "debugging",
+      "difficulty": "hard",
+      "question": "Trace 里某个步骤显示 status 为 timeout，但实际没有超时设置，这是什么原因？",
+      "tags": ["timeout", "调试", "状态"],
+      "expected_key_points": [
+        "检查该 step 的 duration_ms 是否异常（如为 null 或 0）",
+        "可能是上游调用方（如用户代码）手动标记了 timeout 状态",
+        "检查 step 的 error 字段是否有底层异常信息",
+        "也可能是序列化/反序列化过程中状态的错误传递",
+        "建议在 step 创建时添加 event 记录状态变更过程"
+      ],
+      "bad_answer_patterns": [
+        "只说检查超时配置不深入分析可能原因",
+        "没有提到 event 机制用于追踪状态变化"
+      ]
+    },
+    {
+      "id": "aq012",
+      "category": "cost_optimization",
+      "difficulty": "hard",
+      "question": "我的 Agent 每次任务 token 消耗在 500K 左右，怎么系统性地降低成本？",
+      "tags": ["cost", "优化", "token"],
+      "expected_key_points": [
+        "先用 analyze_cost() 按模型和步骤类型分组看大头在哪",
+        "检查 by_step_type 看 retrieval/memory 是否携带过多上下文",
+        "model_call 步骤的 input 是否包含了不必要的对话历史",
+        "考虑对长对话做摘要压缩减少 prompt token",
+        "对比不同模型的 cost 差异（如 Haiku vs Opus）"
+      ],
+      "bad_answer_patterns": [
+        "只给笼统建议（如'减少 token'）没有分析思路",
+        "没有提到 retrieval/memory 步骤可能是 token 大头"
+      ]
+    },
+    {
+      "id": "aq013",
+      "category": "web_ui",
+      "difficulty": "easy",
+      "question": "Web UI 的时间线视图有什么用？怎么看？",
+      "tags": ["Web UI", "时间线", "可视化"],
+      "expected_key_points": [
+        "Timeline 组件按时间顺序展示所有步骤",
+        "每个步骤显示 type/name/status/duration",
+        "可以看到步骤之间的时间重叠和等待",
+        "点击步骤展开 StepInspector 查看输入输出详情",
+        "帮助快速定位耗时最长的步骤"
+      ],
+      "bad_answer_patterns": [
+        "没有提到可以点击步骤查看详情",
+        "没有说明时间线帮助发现等待/空闲时间"
+      ]
+    },
+    {
+      "id": "aq014",
+      "category": "schema",
+      "difficulty": "medium",
+      "question": "trace.schema.json 里 step_type 有哪几种？分别在什么场景使用？",
+      "tags": ["schema", "step_type", "规范"],
+      "expected_key_points": [
+        "model_call: 调用 LLM 模型",
+        "tool_call: 调用外部工具/API",
+        "retrieval: RAG 检索或知识库查询",
+        "memory: 读写记忆/上下文",
+        "planner: 规划/决策步骤",
+        "control: 流程控制（循环、条件）",
+        "custom: 自定义类型"
+      ],
+      "bad_answer_patterns": [
+        "列举不全",
+        "没有说明每种类型的使用场景"
+      ]
+    },
+    {
+      "id": "aq015",
+      "category": "debugging",
+      "difficulty": "medium",
+      "question": "同一个 Agent 跑了两次同样的任务，一次成功一次失败，怎么快速找到差异？",
+      "tags": ["diff", "对比", "调试"],
+      "expected_key_points": [
+        "使用 CLI 的 trace diff 命令",
+        "或 Web UI 的 DiffView/ReplayCompareView",
+        "关注两次运行的步骤数量差异",
+        "找到分叉点：第一个不同的步骤往往就是根因",
+        "对比失败那次在分叉步骤之后的所有 step"
+      ],
+      "bad_answer_patterns": [
+        "让人手工对比而不是用 diff 工具",
+        "没有说明'分叉点'的重要性和定位方法"
+      ]
+    },
+    {
+      "id": "aq016",
+      "category": "integration",
+      "difficulty": "medium",
+      "question": "我能在不修改 Agent 代码的情况下追踪它吗？比如通过装饰器？",
+      "tags": ["装饰器", "无侵入", "SDK"],
+      "expected_key_points": [
+        "可以使用 Python 装饰器模式包装 Agent 函数",
+        "在装饰器中创建 Trace，每个函数调用对应一个 step",
+        "装饰器自动记录输入参数和返回值",
+        "示例：@trace_step(type='model_call') 装饰 LLM 调用函数",
+        "建议同时用 context manager 管理 run 生命周期"
+      ],
+      "bad_answer_patterns": [
+        "没有给出装饰器封装思路",
+        "说必须完全重写 Agent 代码"
+      ]
+    },
+    {
+      "id": "aq017",
+      "category": "product_usage",
+      "difficulty": "easy",
+      "question": "Trace 文件保存在哪里？是什么格式？",
+      "tags": ["存储", "格式", "trace"],
+      "expected_key_points": [
+        "保存在 traces/ 目录下",
+        "文件名格式：<run_id>.trace.json",
+        "JSON 格式，符合 schemas/trace.schema.json 规范",
+        "包含 schema_version / run / steps 三个顶层字段",
+        "可用任何 JSON 工具打开查看"
+      ],
+      "bad_answer_patterns": [
+        "没有提到具体的文件命名规则",
+        "没有说明 JSON 的三层结构"
+      ]
+    },
+    {
+      "id": "aq018",
+      "category": "analysis",
+      "difficulty": "hard",
+      "question": "detect_loops 和 detect_retries 的区别是什么？什么情况下该用哪个？",
+      "tags": ["loop", "retry", "区分", "分析"],
+      "expected_key_points": [
+        "loop 检测连续的重复调用（不管是否失败），看是否有不必要的重复",
+        "retry 检测失败后的重试链条，看错误恢复能力",
+        "loop 的 threshold 可配置（默认 3），retry 无 threshold",
+        "同一个步骤序列可能同时触发 loop 和 retry 检测",
+        "loop 关注效率问题，retry 关注可靠性问题"
+      ],
+      "bad_answer_patterns": [
+        "混淆两者的检测逻辑",
+        "没说明它们可以同时存在不互斥"
+      ]
+    },
+    {
+      "id": "aq019",
+      "category": "web_ui",
+      "difficulty": "medium",
+      "question": "CostPanel 里的 by_model 和 by_step_type 视图分别能告诉我什么？",
+      "tags": ["cost", "Web UI", "分析"],
+      "expected_key_points": [
+        "by_model: 按模型拆分花费，比如看到 Opus vs Haiku 各自的占比",
+        "by_step_type: 按步骤类型拆分，可以看出 tool_call 比 model_call 更花钱",
+        "帮助决策是否切换更便宜的模型",
+        "帮助发现非模型调用的隐形成本（如 retrieval）"
+      ],
+      "bad_answer_patterns": [
+        "只描述视图不解释决策价值"
+      ]
+    },
+    {
+      "id": "aq020",
+      "category": "debugging",
+      "difficulty": "hard",
+      "question": "我的 Agent 在一个步骤上花了 30 秒，但那个步骤只是一个简单的 LLM 调用。怎么排查慢的原因？",
+      "tags": ["latency", "调试", "性能"],
+      "expected_key_points": [
+        "查看该 step 的 events 数组，看是否有中间事件记录了子阶段耗时",
+        "检查是否是网络延迟（模型 API 响应慢）",
+        "看 input/output 大小——token 数量大也会导致生成慢",
+        "对比同模型其他步骤的耗时判断是否个别异常",
+        "考虑是模型端限流/排队导致的延迟"
+      ],
+      "bad_answer_patterns": [
+        "只说是模型慢没有排查思路",
+        "没有提到 events 字段可用于记录子阶段耗时"
+      ]
+    },
+    {
+      "id": "aq021",
+      "category": "integration",
+      "difficulty": "medium",
+      "question": "我如何用 labels 来组织多个实验？有什么推荐实践？",
+      "tags": ["labels", "实验", "组织"],
+      "expected_key_points": [
+        "Run 创建时传入 labels dict",
+        "推荐标签：experiment（实验名）、version（版本）、model（模型）、prompt_variant",
+        "后续可以在 Web UI 按标签筛选和分组对比",
+        "示例：labels={'experiment':'prompt-optimization','variant':'A','model':'opus'}",
+        "标签命名保持一致便于后续分析"
+      ],
+      "bad_answer_patterns": [
+        "没有给出具体的标签命名建议",
+        "没有说明标签的主要用途是后续筛选和对比"
+      ]
+    },
+    {
+      "id": "aq022",
+      "category": "schema",
+      "difficulty": "medium",
+      "question": "我想在 step 里加一些自定义字段，schema 支持吗？怎么做？",
+      "tags": ["schema", "扩展", "自定义"],
+      "expected_key_points": [
+        "Step 有 metadata 字段（dict），专门用于自定义扩展",
+        "schema 设置了 additionalProperties: true，允许额外字段",
+        "可以存任何 JSON-serializable 的数据",
+        "自定义字段不会破坏现有分析器的兼容性",
+        "如果要新增通用字段，建议先更新 schema 再实现"
+      ],
+      "bad_answer_patterns": [
+        "没有提到 metadata 字段的存在",
+        "说必须修改 schema 才能加字段"
+      ]
+    },
+    {
+      "id": "aq023",
+      "category": "cost_optimization",
+      "difficulty": "medium",
+      "question": "我想给我的 Agent 设定每日预算上限，Agent DevTools 能帮我做预算告警吗？",
+      "tags": ["budget", "cost", "告警"],
+      "expected_key_points": [
+        "当前 Agent DevTools 是事后分析工具，不直接支持实时预算告警",
+        "可以定期运行 analyze_cost() 检查累计花费",
+        "配合 cron job 或 CI 中的 cost 检查脚本实现",
+        "建议在 trace 保存后立即跑一次 cost 分析并判断阈值",
+        "未来可能加入实时 hook 机制做预算控制"
+      ],
+      "bad_answer_patterns": [
+        "虚假承诺产品已有实时告警功能",
+        "没有给出可行的替代方案"
+      ]
+    },
+    {
+      "id": "aq024",
+      "category": "product_usage",
+      "difficulty": "easy",
+      "question": "Step 有哪几种状态（status）？分别是什么意思？",
+      "tags": ["status", "step", "基础"],
+      "expected_key_points": [
+        "success: 步骤成功完成",
+        "error: 步骤执行失败",
+        "cancelled: 步骤被取消",
+        "timeout: 步骤超时"
+      ],
+      "bad_answer_patterns": [
+        "遗漏了 cancelled 或 timeout 状态"
+      ]
+    },
+    {
+      "id": "aq025",
+      "category": "analysis",
+      "difficulty": "medium",
+      "question": "LatencyAnalysis 返回的 avg_ms 是怎么算的？slowest 只返回前几名？",
+      "tags": ["latency", "分析", "统计"],
+      "expected_key_points": [
+        "avg_ms = total_ms / step_count",
+        "只统计有 step 的数量，不考虑 step 的 status",
+        "slowest 默认返回 top-5 最慢步骤",
+        "by_step_type 可以看哪种类型的步骤平均最慢",
+        "如果某步骤 duration_ms 为 null，视为 0"
+      ],
+      "bad_answer_patterns": [
+        "没有说明 duration_ms 为 null 时的处理逻辑",
+        "没有提到 slowest 固定返回 5 条"
+      ]
+    },
+    {
+      "id": "aq026",
+      "category": "debugging",
+      "difficulty": "hard",
+      "question": "Trace 里的 events 数组是干什么的？我应该往里面放什么？",
+      "tags": ["events", "调试", "日志"],
+      "expected_key_points": [
+        "events 用于记录步骤执行过程中的中间事件",
+        "每个 Event 有 timestamp/type/message/data 字段",
+        "典型用法：记录子阶段开始/结束、中间结果、状态变更",
+        "例如: {'timestamp':'...', 'type':'cache_check', 'message':'cache miss', 'data':{...}}",
+        "events 帮助细粒度定位步骤内部的耗时和逻辑"
+      ],
+      "bad_answer_patterns": [
+        "没有给出具体的 event 使用示例",
+        "说 events 不重要或不需要使用"
+      ]
+    },
+    {
+      "id": "aq027",
+      "category": "cli",
+      "difficulty": "medium",
+      "question": "如何用 CLI 批量导出所有 trace 的成本报告？",
+      "tags": ["CLI", "批量", "cost", "导出"],
+      "expected_key_points": [
+        "可以用 trace list 获取所有 trace ID",
+        "然后对每个 ID 执行 trace cost <id>",
+        "或者写脚本遍历 traces/ 目录用 Python SDK 批量分析",
+        "CLI 目前没有内置的批量导出命令",
+        "可以结合 shell 脚本或 Python 脚本实现"
+      ],
+      "bad_answer_patterns": [
+        "说有批量命令但实际不存在",
+        "没有给出脚本遍历的思路"
+      ]
+    },
+    {
+      "id": "aq028",
+      "category": "web_ui",
+      "difficulty": "medium",
+      "question": "ReplayView 是做什么的？和 DiffView 有什么不同？",
+      "tags": ["Web UI", "replay", "diff"],
+      "expected_key_points": [
+        "ReplayView: 回放单次运行的步骤执行过程，按时间顺序逐步展示",
+        "DiffView: 并排对比两次运行的差异",
+        "ReplayCompareView: 同时回放两次运行并对比",
+        "Replay 侧重理解执行过程，Diff 侧重找出差异"
+      ],
+      "bad_answer_patterns": [
+        "混淆 Replay 和 Diff 的用途"
+      ]
+    },
+    {
+      "id": "aq029",
+      "category": "integration",
+      "difficulty": "hard",
+      "question": "我想在 Agent 运行时实时看到 trace 更新，而不是等跑完了再看。能做到吗？",
+      "tags": ["实时", "streaming", "集成"],
+      "expected_key_points": [
+        "当前 Agent DevTools 是以文件形式保存完整 trace，默认是事后分析",
+        "可以通过逐 step 写入 + 文件监听实现近实时更新",
+        "Web UI 的 TracePicker 支持 loadWorkspaceTrace 加载最新 trace",
+        "SDK 层面可以在每个 step.complete() 后立即 flush 到文件",
+        "真正的实时 streaming 需要 WebSocket 或 SSE 支持，当前版本未内置"
+      ],
+      "bad_answer_patterns": [
+        "承诺已有完整的实时 streaming 功能",
+        "没有给出近实时的替代方案"
+      ]
+    },
+    {
+      "id": "aq030",
+      "category": "product_usage",
+      "difficulty": "easy",
+      "question": "Agent DevTools 支持哪些 LLM 模型？和模型提供商有关吗？",
+      "tags": ["模型", "兼容性", "provider"],
+      "expected_key_points": [
+        "Agent DevTools 是模型无关的追踪工具",
+        "不绑定任何特定模型提供商",
+        "step.model 字段记录使用的模型名称（如 gpt-4, claude-opus-4-8 等）",
+        "任何 LLM 调用都可以被追踪，只要正确记录 step",
+        "cost 计算依赖用户自行填入 token 和金额信息"
+      ],
+      "bad_answer_patterns": [
+        "说只支持某几个模型",
+        "没有提到 cost 需要用户自行填写"
+      ]
+    },
+    {
+      "id": "aq031",
+      "category": "analysis",
+      "difficulty": "hard",
+      "question": "analyze() 返回的 TraceReport 里 summary 字段是怎么生成的？我可以自定义吗？",
+      "tags": ["report", "summary", "自定义"],
+      "expected_key_points": [
+        "summary 是在 analyze() 中自动生成的纯文本摘要",
+        "包含 step 数量、总 token/花费、总耗时、失败/循环/重试情况",
+        "当前版本不支持自定义 summary 格式",
+        "但可以基于 TraceReport 的各个子报告自行拼接想要的摘要",
+        "TraceReport 是 dataclass，可以直接访问字段做二次处理"
+      ],
+      "bad_answer_patterns": [
+        "说可以自定义但实际上不支持",
+        "没有提到可以直接用 TraceReport 字段自定义"
+      ]
+    },
+    {
+      "id": "aq032",
+      "category": "debugging",
+      "difficulty": "medium",
+      "question": "Step 之间的 parent_id 有什么用？什么场景需要设置？",
+      "tags": ["parent_id", "层级", "step"],
+      "expected_key_points": [
+        "parent_id 建立步骤之间的父子层级关系",
+        "用于表示嵌套调用：如 planner 步骤中嵌套了多个 model_call 和 tool_call",
+        "Timeline 和 StepInspector 可以按树形结构展示",
+        "不设置 parent_id 时所有步骤是平级的",
+        "典型用法：agent loop 中每个迭代是父步骤，内部 LLM 调用是子步骤"
+      ],
+      "bad_answer_patterns": [
+        "没有给出嵌套调用的具体场景",
+        "说 parent_id 不重要"
+      ]
+    },
+    {
+      "id": "aq033",
+      "category": "cost_optimization",
+      "difficulty": "medium",
+      "question": "我的 trace 里有 200 个步骤，但只有 50 个有 cost 信息。分析结果还准确吗？",
+      "tags": ["cost", "数据质量", "分析"],
+      "expected_key_points": [
+        "analyze_cost() 只统计有 cost 且 total_tokens > 0 的步骤",
+        "steps_with_cost 字段会告诉你实际参与统计的步骤数",
+        "无 cost 的步骤会被跳过，不影响其他步骤的统计",
+        "step_count 显示总步骤数，steps_with_cost 显示有花费的步骤数",
+        "如果大部分步骤没有 cost，整体 cost 分析会偏低，需要补齐数据"
+      ],
+      "bad_answer_patterns": [
+        "没有提到 steps_with_cost 和 step_count 的区别",
+        "说分析结果不受影响"
+      ]
+    },
+    {
+      "id": "aq034",
+      "category": "schema",
+      "difficulty": "medium",
+      "question": "如果我需要添加一个新的 step_type（比如 embedding），应该怎么操作？",
+      "tags": ["schema", "扩展", "step_type"],
+      "expected_key_points": [
+        "当前 step_type 枚举在 trace.schema.json 中定义",
+        "StepType 是 Literal 类型，在 trace.py 中硬编码",
+        "添加新类型需要：1) 更新 schema 的 step_type enum；2) 更新 trace.py 的 StepType",
+        "建议使用 custom 类型并通过 metadata 区分，避免改动核心 schema",
+        "如果确实需要，先更新 schema（source of truth），再改代码"
+      ],
+      "bad_answer_patterns": [
+        "只说改 schema 不提代码也要改",
+        "没有提到可以用 custom + metadata 的绕过方案"
+      ]
+    },
+    {
+      "id": "aq035",
+      "category": "debugging",
+      "difficulty": "hard",
+      "question": "Step 的 input/output 字段有没有大小限制？存了很大的数据会不会有问题？",
+      "tags": ["性能", "存储", "数据大小"],
+      "expected_key_points": [
+        "input/output 字段在 schema 中没有硬性大小限制",
+        "过大的 input/output 会导致 trace 文件体积膨胀",
+        "建议对大文本做截断或引用外部存储（如存 S3 URL）",
+        "Web UI 加载大型 trace 可能变慢",
+        "可以用 metadata 存数据指针，input/output 存摘要"
+      ],
+      "bad_answer_patterns": [
+        "说有硬性限制",
+        "没有给出大数据的处理建议"
+      ]
+    },
+    {
+      "id": "aq036",
+      "category": "product_usage",
+      "difficulty": "easy",
+      "question": "Agent DevTools 是开源的吗？用什么 license？",
+      "tags": ["开源", "license", "产品"],
+      "expected_key_points": [
+        "定位为本地开发工具",
+        "源码可直接使用和修改",
+        "具体 license 需查看项目根目录的 LICENSE 文件"
+      ],
+      "bad_answer_patterns": [
+        "编造具体的 license 名称"
+      ]
+    },
+    {
+      "id": "aq037",
+      "category": "analysis",
+      "difficulty": "medium",
+      "question": "怎么判断一个 Agent 运行是'健康'的？有什么指标可以参考？",
+      "tags": ["健康度", "指标", "最佳实践"],
+      "expected_key_points": [
+        "failure_rate = 0: 所有步骤通过",
+        "has_suspicious_loops = False: 无重复调用浪费",
+        "total_retry_chains 低且 retry 最终 success: 错误恢复良好",
+        "cost 分布合理：model_call 应占大头，tool_call 不应异常高",
+        "latency 无异常尖峰：slowest 步骤耗时在可接受范围"
+      ],
+      "bad_answer_patterns": [
+        "只提一个指标忽视综合分析",
+        "没有给出具体的合理阈值参考"
+      ]
+    },
+    {
+      "id": "aq038",
+      "category": "integration",
+      "difficulty": "medium",
+      "question": "SDK 的 new_run() 函数里的 task 参数应该填什么？有什么规范？",
+      "tags": ["SDK", "task", "命名"],
+      "expected_key_points": [
+        "task 是对本次运行的描述",
+        "建议格式：简短的一句话任务描述",
+        "示例：'回答用户关于股票行情的问题'、'执行代码审查'",
+        "task 会显示在 Web UI 的 run 列表中帮助识别",
+        "推荐加上关键参数信息如 'generate report (project=foo, date=2026-07-10)'"
+      ],
+      "bad_answer_patterns": [
+        "说 task 不重要随便填",
+        "没有给出推荐的命名格式"
+      ]
+    },
+    {
+      "id": "aq039",
+      "category": "web_ui",
+      "difficulty": "medium",
+      "question": "StepInspector 展示哪些信息？我能从这里看到什么？",
+      "tags": ["Web UI", "StepInspector", "调试"],
+      "expected_key_points": [
+        "步骤基本信息：id, type, name, status, model",
+        "时间信息：started_at, ended_at, duration_ms",
+        "输入输出：input 和 output 的完整内容",
+        "工具调用：tool.name, tool.args, tool.result",
+        "错误信息：error.type, error.message, error.stack",
+        "事件日志：events 列表按时间排列",
+        "花费：cost 的 token 和金额明细"
+      ],
+      "bad_answer_patterns": [
+        "遗漏了 events 或 cost 信息"
+      ]
+    },
+    {
+      "id": "aq040",
+      "category": "debugging",
+      "difficulty": "hard",
+      "question": "Trace 里有两个 step 的时间戳重叠了（一个没结束另一个就开始了），这是 bug 吗？",
+      "tags": ["时间戳", "并发", "step"],
+      "expected_key_points": [
+        "不一定是 bug——step 可以是并发的",
+        "Agent DevTools 支持记录并发执行的步骤",
+        "如果业务逻辑上应该是顺序执行但时间重叠，才是 bug",
+        "检查 parent_id：如果它们是不同父步骤下的子步骤，并发是正常的",
+        "Timeline 视图可以直观看到并发关系"
+      ],
+      "bad_answer_patterns": [
+        "直接说是 bug 不考虑并发场景",
+        "没有提到 parent_id 对判断并发是否合理的作用"
+      ]
+    },
+    {
+      "id": "aq041",
+      "category": "cost_optimization",
+      "difficulty": "medium",
+      "question": "我发现 tool_call 步骤的 cost 都是 0，这正常吗？",
+      "tags": ["cost", "tool_call", "数据"],
+      "expected_key_points": [
+        "tool_call 本身通常不产生 LLM token 费用",
+        "但如果工具内部调用了 LLM（如 tool 内部做 embedding），应该有 cost",
+        "检查是否正确记录了 tool 内部的 LLM 调用（应作为子 step）",
+        "外部 API 调用费用（如搜索 API）可以通过 metadata 记录",
+        "确认是否是漏填了 cost 信息"
+      ],
+      "bad_answer_patterns": [
+        "简单说正常或不正常没有分析不同情况",
+        "没有提到工具内部 LLM 调用应该单独记录"
+      ]
+    },
+    {
+      "id": "aq042",
+      "category": "product_usage",
+      "difficulty": "medium",
+      "question": "如何在 CI/CD 流水线中集成 Agent DevTools 的 trace 分析？",
+      "tags": ["CI/CD", "自动化", "集成"],
+      "expected_key_points": [
+        "在 CI 中安装 agent-devtools Python SDK",
+        "测试脚本中收集 trace 并保存为 .trace.json",
+        "在 CI 步骤中运行 analyze() 检查关键指标",
+        "可以设置 failure_rate > 0 或 cost 超阈值时让 CI 失败",
+        "将 trace 文件作为 CI artifacts 保存供后续查看"
+      ],
+      "bad_answer_patterns": [
+        "没有提到如何让 CI 失败的具体策略",
+        "没有提到 trace 作为 artifacts 保存"
+      ]
+    },
+    {
+      "id": "aq043",
+      "category": "debugging",
+      "difficulty": "medium",
+      "question": "Error 的 type 字段应该填什么？和 Python 异常类名有什么关系？",
+      "tags": ["error", "type", "规范"],
+      "expected_key_points": [
+        "推荐填写 Python 异常类名：如 ValueError, ConnectionError, TimeoutError",
+        "也可以是自定义的错误分类：如 APIError, RateLimitError, ParseError",
+        "Error.from_exc() 会自动提取异常类名作为 type",
+        "type 帮助在分析时按错误类型分类统计",
+        "保持同一项目中 type 命名一致便于聚合分析"
+      ],
+      "bad_answer_patterns": [
+        "说 type 字段不重要随便填",
+        "没有提到 from_exc() 的自动提取功能"
+      ]
+    },
+    {
+      "id": "aq044",
+      "category": "analysis",
+      "difficulty": "hard",
+      "question": "如果我想做 A/B 测试来比较两种 prompt 的效果，Agent DevTools 的推荐流程是什么？",
+      "tags": ["A/B测试", "实验", "prompt"],
+      "expected_key_points": [
+        "使用 labels 标记实验组：labels={'experiment':'prompt-ab','variant':'A'}",
+        "每个 variant 跑多轮（建议 ≥5 次）获得统计意义",
+        "用 analyze() 收集每组的所有 TraceReport",
+        "对比指标：avg cost、avg latency、failure_rate、retries",
+        "使用 DiffView 对比典型的两条 trace 看步骤差异",
+        "择优后用 labels={'experiment':'production','version':'v2'} 标记上线版本"
+      ],
+      "bad_answer_patterns": [
+        "只比较单次运行没有统计意义",
+        "没有提到多轮运行和统计比较"
+      ]
+    },
+    {
+      "id": "aq045",
+      "category": "web_ui",
+      "difficulty": "easy",
+      "question": "SummaryBar 显示哪些汇总信息？在页面的什么位置？",
+      "tags": ["Web UI", "SummaryBar", "概览"],
+      "expected_key_points": [
+        "显示 run 的基本信息：task, status, 总耗时",
+        "步骤统计：总步数、成功/失败数",
+        "Cost 汇总：总 token、总花费",
+        "位于页面顶部，作为当前 trace 的概览卡片",
+        "快速判断这次运行的整体情况"
+      ],
+      "bad_answer_patterns": [
+        "遗漏了 cost 或步骤统计信息"
+      ]
+    }
+  ]
+}
