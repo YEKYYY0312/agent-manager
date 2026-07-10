@@ -269,6 +269,22 @@ class TestTrace:
         assert tc.input_tokens == 10
         assert tc.amount_usd == 0.01
 
+    def test_total_cost_rejects_mutated_negative_step_cost(self) -> None:
+        t = new_run("task")
+        t.add_step(Step(type="model_call", name="llm", cost=Cost(input_tokens=10, total_tokens=10, amount_usd=0.01)))
+        t.steps[0].cost.amount_usd = -999
+
+        with pytest.raises(ValueError, match="amount_usd"):
+            t.total_cost()
+
+    def test_total_cost_rejects_mutated_non_finite_run_cost(self) -> None:
+        t = new_run("task")
+        t.run.cost = Cost(input_tokens=10, total_tokens=10, amount_usd=0.01)
+        t.run.cost.amount_usd = math.nan
+
+        with pytest.raises(ValueError, match="amount_usd"):
+            t.total_cost()
+
     def test_to_dict_schema_version(self) -> None:
         t = new_run("task")
         d = t.to_dict()

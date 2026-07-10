@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from time import perf_counter
+
+import pytest
 
 from agent_devtools import Cost, Error, Step, Trace, new_run
 from agent_devtools.analysis import (
@@ -80,6 +83,13 @@ class TestCostAnalysis:
         ca = analyze_cost(_make_trace([s]))
         assert ca.steps_with_cost == 0
         assert ca.total.total_tokens == 0
+
+    def test_rejects_mutated_non_finite_cost_before_aggregation(self) -> None:
+        s = Step(type="model_call", name="llm", model="gpt-4", cost=Cost(input_tokens=10, total_tokens=10, amount_usd=0.05))
+        s.cost.amount_usd = math.inf
+
+        with pytest.raises(ValueError, match="amount_usd"):
+            analyze_cost(_make_trace([s]))
 
 
 # ---------------------------------------------------------------------------

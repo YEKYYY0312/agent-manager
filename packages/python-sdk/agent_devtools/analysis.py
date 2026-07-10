@@ -35,6 +35,7 @@ def analyze_cost(trace: Trace) -> CostAnalysis:
         c = step.cost
         if not c or c.total_tokens == 0:
             continue
+        c.validate()
 
         m = step.model or "(unknown)"
         if m not in by_model:

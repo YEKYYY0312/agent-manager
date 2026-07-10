@@ -43,10 +43,14 @@ class Cost:
     amount_usd: float = 0.0
 
     def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> Cost:
         self.input_tokens = _validate_non_negative_int("input_tokens", self.input_tokens)
         self.output_tokens = _validate_non_negative_int("output_tokens", self.output_tokens)
         self.total_tokens = _validate_non_negative_int("total_tokens", self.total_tokens)
         self.amount_usd = _validate_non_negative_float("amount_usd", self.amount_usd)
+        return self
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -361,11 +365,13 @@ class Trace:
         c = Cost()
         for step in self.steps:
             if step.cost:
-                c.input_tokens += step.cost.input_tokens
-                c.output_tokens += step.cost.output_tokens
-                c.total_tokens += step.cost.total_tokens
-                c.amount_usd += step.cost.amount_usd
+                step_cost = step.cost.validate()
+                c.input_tokens += step_cost.input_tokens
+                c.output_tokens += step_cost.output_tokens
+                c.total_tokens += step_cost.total_tokens
+                c.amount_usd += step_cost.amount_usd
         if c.total_tokens == 0 and self.run.cost:
+            self.run.cost.validate()
             return Cost(
                 input_tokens=self.run.cost.input_tokens,
                 output_tokens=self.run.cost.output_tokens,
