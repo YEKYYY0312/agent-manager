@@ -11,10 +11,9 @@ import { ReplayView } from './ReplayView';
 import { ReplayCompareView } from './ReplayCompareView';
 import { ExperimentView } from './ExperimentView';
 import {
-  appendPersistedImportedTrace,
   loadPersistedImportedTraces,
+  persistImportedTrace,
   restorePersistedTraceContent,
-  saveImportedTraceContent,
 } from './storage';
 import {
   DEFAULT_TAB,
@@ -94,8 +93,7 @@ function App() {
       const imported = await loadTraceFromFile(file);
       const path = `import:${Date.now()}:${file.name}`;
       const option = { path, label: file.name };
-      appendPersistedImportedTrace(option, imported);
-      void saveImportedTraceContent(option, imported);
+      await persistImportedTrace(option, imported);
       setImportedTraceMap((prev) => ({ ...prev, [path]: imported }));
       setImportedTraces((prev) => [...prev, option]);
       setTrace(imported);

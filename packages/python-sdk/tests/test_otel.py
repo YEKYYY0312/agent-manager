@@ -140,6 +140,35 @@ class _CaptureServer:
         return self.handler.requests
 
 
+class _RedirectServer:
+    def __init__(self) -> None:
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                self.send_response(302)
+                self.send_header("Location", "/redirected")
+                self.end_headers()
+
+            def log_message(self, format: str, *args: Any) -> None:
+                return
+
+        self.httpd = HTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+
+    def __enter__(self) -> "_RedirectServer":
+        self.thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.httpd.shutdown()
+        self.thread.join(timeout=2)
+        self.httpd.server_close()
+
+    @property
+    def url(self) -> str:
+        host, port = self.httpd.server_address
+        return f"http://{host}:{port}/v1/traces"
+
+
 def test_trace_to_otlp_json_exports_run_and_step_spans() -> None:
     data = trace_to_otlp_json(_make_trace())
 
@@ -287,6 +316,14 @@ def test_push_trace_to_otlp_http_raises_for_non_2xx() -> None:
     assert "collector down" in exc_info.value.response_body
 
 
+def test_push_trace_to_otlp_http_rejects_redirect_responses() -> None:
+    with _RedirectServer() as server:
+        with pytest.raises(OtlpHttpExportError) as exc_info:
+            push_trace_to_otlp_http(_make_trace(), endpoint=server.url, timeout_seconds=2)
+
+    assert exc_info.value.status_code == 302
+
+
 def test_push_trace_to_otlp_http_rejects_non_loopback_http_endpoint() -> None:
     with pytest.raises(OtlpHttpExportError, match="insecure"):
         push_trace_to_otlp_http(_make_trace(), endpoint="http://example.com/v1/traces", timeout_seconds=2)
@@ -317,7 +354,7 @@ def test_push_trace_to_otlp_http_can_allow_private_network_endpoint(monkeypatch)
         captured["context"] = context
         return _FakeResponse()
 
-    monkeypatch.setattr("agent_devtools.otel.urlopen", fake_urlopen)
+    monkeypatch.setattr("agent_devtools.otel._open_otlp_request", fake_urlopen)
 
     result = push_trace_to_otlp_http(
         _make_trace(),
@@ -357,7 +394,7 @@ def test_push_trace_to_otlp_http_pins_validated_dns_resolution(monkeypatch) -> N
         return _FakeResponse()
 
     monkeypatch.setattr("agent_devtools.otel._resolve_host_ips", fake_resolve)
-    monkeypatch.setattr("agent_devtools.otel.urlopen", fake_urlopen)
+    monkeypatch.setattr("agent_devtools.otel._open_otlp_request", fake_urlopen)
 
     result = push_trace_to_otlp_http(
         _make_trace(),
@@ -389,7 +426,7 @@ def test_push_trace_to_otlp_http_uses_explicit_tls_context(monkeypatch) -> None:
         captured["context"] = context
         return _FakeResponse()
 
-    monkeypatch.setattr("agent_devtools.otel.urlopen", fake_urlopen)
+    monkeypatch.setattr("agent_devtools.otel._open_otlp_request", fake_urlopen)
 
     result = push_trace_to_otlp_http(
         _make_trace(),

@@ -100,6 +100,24 @@ export function appendPersistedImportedTrace(
   );
 }
 
+export async function persistImportedTrace(
+  option: TraceOption,
+  trace: Trace,
+  storage = browserStorage(),
+  traceStore = browserTraceContentStore(),
+): Promise<void> {
+  if (!traceStore) return;
+  await traceStore.save(option.path, trace);
+
+  const current = loadPersistedImportedTraces(storage);
+  const options = current.options.filter((item) => item.path !== option.path);
+  persistImportedTraces(
+    [...options, option],
+    { ...current.traceMap, [option.path]: trace },
+    storage,
+  );
+}
+
 export function clearPersistedImportedTraces(storage = browserStorage(), traceStore?: TraceContentStore): void {
   if (!storage) return;
   try {

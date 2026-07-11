@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .trace import Cost, Step, Trace
 
@@ -182,7 +182,7 @@ def push_trace_to_otlp_http(
 
     try:
         with _pinned_dns_resolution(parsed.hostname or "", pinned_ips):
-            response = urlopen(request, **open_kwargs)
+            response = _open_otlp_request(request, **open_kwargs)
         with response:
             body = response.read().decode("utf-8", errors="replace")
             status_code = int(response.status)
@@ -413,6 +413,17 @@ def _resolve_endpoint(endpoint: str | None) -> str:
     if base_endpoint:
         return _append_traces_path(base_endpoint)
     return DEFAULT_OTLP_HTTP_ENDPOINT
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Keep OTLP endpoint validation valid for the entire request."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _open_otlp_request(request: Request, **kwargs: Any):
+    return build_opener(_NoRedirectHandler()).open(request, **kwargs)
 
 
 def _append_traces_path(endpoint: str) -> str:

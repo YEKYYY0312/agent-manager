@@ -5,6 +5,8 @@ import {
   decryptTraceForStorage,
   encryptTraceForStorage,
   loadPersistedImportedTraces,
+  persistImportedTrace,
+  type AsyncTraceContentStore,
   type TraceContentStore,
 } from './storage.ts';
 
@@ -172,6 +174,38 @@ test('appendPersistedImportedTrace keeps sensitive payloads out of localStorage'
   assertEqual(raw.includes('github_pat_secret'), false, 'token not persisted');
   const loaded = loadPersistedImportedTraces(storage, traceStore);
   assertEqual(loaded.traceMap['import:2:sensitive.trace.json']?.steps.length, 1, 'trace content restored from content store');
+});
+
+await testAsync('persistImportedTrace does not publish an import when encrypted storage fails', async () => {
+  const storage = new MemoryStorage() as Storage;
+  const failingStore: AsyncTraceContentStore = {
+    async load() { return null; },
+    async save() { throw new Error('quota exceeded'); },
+    async remove() {},
+    async clear() {},
+  };
+
+  await Promise.resolve(persistImportedTrace(
+    { path: 'import:3:failed.trace.json', label: 'failed.trace.json' },
+    trace,
+    storage,
+    failingStore,
+  )).catch(() => undefined);
+
+  assertEqual(loadPersistedImportedTraces(storage).options.length, 0, 'failed import is not persisted');
+});
+
+await testAsync('persistImportedTrace does not publish an import without encrypted storage', async () => {
+  const storage = new MemoryStorage() as Storage;
+
+  await persistImportedTrace(
+    { path: 'import:4:memory-only.trace.json', label: 'memory-only.trace.json' },
+    trace,
+    storage,
+    null,
+  );
+
+  assertEqual(loadPersistedImportedTraces(storage).options.length, 0, 'memory-only import is not persisted');
 });
 
 test('clearPersistedImportedTraces removes saved imports', () => {
