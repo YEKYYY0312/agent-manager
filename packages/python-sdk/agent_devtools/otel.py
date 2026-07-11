@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import ipaddress
 import json
 import os
 import re
 import socket
 import ssl
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPHandler, HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from .trace import Cost, Step, Trace
 
@@ -181,8 +181,7 @@ def push_trace_to_otlp_http(
         open_kwargs["context"] = ssl.create_default_context()
 
     try:
-        with _pinned_dns_resolution(parsed.hostname or "", pinned_ips):
-            response = _open_otlp_request(request, **open_kwargs)
+        response = _open_otlp_request(request, pinned_ips=pinned_ips, **open_kwargs)
         with response:
             body = response.read().decode("utf-8", errors="replace")
             status_code = int(response.status)
@@ -422,8 +421,86 @@ class _NoRedirectHandler(HTTPRedirectHandler):
         return None
 
 
-def _open_otlp_request(request: Request, **kwargs: Any):
-    return build_opener(_NoRedirectHandler()).open(request, **kwargs)
+def _open_otlp_request(
+    request: Request,
+    *,
+    pinned_ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address],
+    timeout: float,
+    context: ssl.SSLContext | None = None,
+):
+    parsed = urlparse(request.full_url)
+    handlers: list[Any] = [_NoRedirectHandler()]
+    if pinned_ips and parsed.scheme == "https":
+        handlers.append(_PinnedHTTPSHandler(pinned_ips, context=context))
+    elif pinned_ips and parsed.scheme == "http":
+        handlers.append(_PinnedHTTPHandler(pinned_ips))
+    return build_opener(*handlers).open(request, timeout=timeout)
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host: str, *args: Any, pinned_ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address], **kwargs: Any) -> None:
+        super().__init__(host, *args, **kwargs)
+        self._pinned_ips = pinned_ips
+
+    def connect(self) -> None:
+        self.sock = _connect_to_pinned_ip(self._pinned_ips, self.port, self.timeout, self.source_address)
+        if self._tunnel_host:
+            self._tunnel()
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host: str, *args: Any, pinned_ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address], **kwargs: Any) -> None:
+        super().__init__(host, *args, **kwargs)
+        self._pinned_ips = pinned_ips
+
+    def connect(self) -> None:
+        self.sock = _connect_to_pinned_ip(self._pinned_ips, self.port, self.timeout, self.source_address)
+        server_hostname = self._tunnel_host or self.host
+        if self._tunnel_host:
+            self._tunnel()
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=server_hostname)
+
+
+class _PinnedHTTPHandler(HTTPHandler):
+    def __init__(self, pinned_ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address]) -> None:
+        super().__init__()
+        self._pinned_ips = pinned_ips
+
+    def http_open(self, request: Request):
+        return self.do_open(
+            lambda host, **kwargs: _PinnedHTTPConnection(host, pinned_ips=self._pinned_ips, **kwargs),
+            request,
+        )
+
+
+class _PinnedHTTPSHandler(HTTPSHandler):
+    def __init__(self, pinned_ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address], context: ssl.SSLContext | None) -> None:
+        super().__init__(context=context)
+        self._pinned_ips = pinned_ips
+
+    def https_open(self, request: Request):
+        return self.do_open(
+            lambda host, **kwargs: _PinnedHTTPSConnection(host, pinned_ips=self._pinned_ips, **kwargs),
+            request,
+            context=self._context,
+        )
+
+
+def _connect_to_pinned_ip(
+    addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address],
+    port: int,
+    timeout: float | object,
+    source_address: tuple[str, int] | None,
+) -> socket.socket:
+    last_error: OSError | None = None
+    for address in addresses:
+        try:
+            return socket.create_connection((str(address), port), timeout, source_address)
+        except OSError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise OtlpHttpExportError("", message="no validated OTLP endpoint addresses available")
 
 
 def _append_traces_path(endpoint: str) -> str:
@@ -498,37 +575,6 @@ def _resolve_host_ips(host: str, endpoint: str) -> list[ipaddress.IPv4Address | 
         if parsed is not None:
             addresses.append(parsed)
     return addresses
-
-
-@contextmanager
-def _pinned_dns_resolution(host: str, addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address]):
-    if not host or not addresses:
-        yield
-        return
-
-    original_getaddrinfo = socket.getaddrinfo
-    pinned_host = host.rstrip(".").lower()
-
-    def pinned_getaddrinfo(query_host, port, family=0, type=0, proto=0, flags=0):
-        query_name = str(query_host).rstrip(".").lower()
-        if query_name != pinned_host:
-            return original_getaddrinfo(query_host, port, family, type, proto, flags)
-
-        results = []
-        socktype = type or socket.SOCK_STREAM
-        for address in addresses:
-            address_family = socket.AF_INET6 if address.version == 6 else socket.AF_INET
-            if family not in (0, address_family):
-                continue
-            sockaddr = (str(address), port, 0, 0) if address.version == 6 else (str(address), port)
-            results.append((address_family, socktype, proto, "", sockaddr))
-        return results or original_getaddrinfo(query_host, port, family, type, proto, flags)
-
-    socket.getaddrinfo = pinned_getaddrinfo
-    try:
-        yield
-    finally:
-        socket.getaddrinfo = original_getaddrinfo
 
 
 def _env_headers() -> dict[str, str]:

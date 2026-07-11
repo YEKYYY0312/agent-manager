@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agent_devtools import CallableAgentAdapter, Cost, Step, ToolCall, Trace, new_run
 from agent_devtools.replay import create_replay_trace, replay_with_adapter
+from agent_devtools.writer import TraceWriter
 
 
 def _make_trace() -> Trace:
@@ -98,7 +99,20 @@ def test_create_replay_trace_rejects_unknown_start_step() -> None:
     except ValueError as exc:
       assert "Start step not found" in str(exc)
     else:
-      raise AssertionError("expected ValueError")
+        raise AssertionError("expected ValueError")
+
+
+def test_create_replay_trace_remaps_nested_parent_ids(tmp_path) -> None:
+    source = new_run("Nested replay")
+    parent = Step(type="planner", name="parent", replayable=True)
+    child = Step(type="tool_call", name="child", parent_id=parent.id, replayable=True)
+    source.add_step(parent)
+    source.add_step(child)
+
+    replay = create_replay_trace(source, start_step_id=parent.id)
+
+    assert replay.steps[1].parent_id == replay.steps[0].id
+    TraceWriter(tmp_path).write(replay)
 
 
 def test_replay_with_adapter_executes_agent_from_selected_step(tmp_path) -> None:

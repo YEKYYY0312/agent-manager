@@ -349,9 +349,10 @@ def test_push_trace_to_otlp_http_can_allow_private_network_endpoint(monkeypatch)
         def read(self) -> bytes:
             return b"{}"
 
-    def fake_urlopen(request, timeout=None, context=None):
+    def fake_urlopen(request, timeout=None, context=None, pinned_ips=None):
         captured["url"] = request.full_url
         captured["context"] = context
+        captured["pinned_ips"] = pinned_ips
         return _FakeResponse()
 
     monkeypatch.setattr("agent_devtools.otel._open_otlp_request", fake_urlopen)
@@ -366,11 +367,13 @@ def test_push_trace_to_otlp_http_can_allow_private_network_endpoint(monkeypatch)
     assert result.ok is True
     assert captured["url"] == "http://169.254.169.254/v1/traces"
     assert captured["context"] is None
+    assert captured["pinned_ips"] == []
 
 
 def test_push_trace_to_otlp_http_pins_validated_dns_resolution(monkeypatch) -> None:
     validated_ip = ipaddress.ip_address("93.184.216.34")
     captured: dict[str, object] = {}
+    original_getaddrinfo = socket.getaddrinfo
 
     class _FakeResponse:
         status = 200
@@ -388,9 +391,9 @@ def test_push_trace_to_otlp_http_pins_validated_dns_resolution(monkeypatch) -> N
         assert host == "collector.example"
         return [validated_ip]
 
-    def fake_urlopen(request, timeout=None, context=None):
-        infos = socket.getaddrinfo("collector.example", 443, type=socket.SOCK_STREAM)
-        captured["resolved_addresses"] = [info[4][0] for info in infos]
+    def fake_urlopen(request, timeout=None, context=None, **kwargs):
+        assert socket.getaddrinfo is original_getaddrinfo
+        captured["pinned_ips"] = kwargs["pinned_ips"]
         return _FakeResponse()
 
     monkeypatch.setattr("agent_devtools.otel._resolve_host_ips", fake_resolve)
@@ -403,7 +406,7 @@ def test_push_trace_to_otlp_http_pins_validated_dns_resolution(monkeypatch) -> N
     )
 
     assert result.ok is True
-    assert captured["resolved_addresses"] == ["93.184.216.34"]
+    assert captured["pinned_ips"] == [validated_ip]
 
 
 def test_push_trace_to_otlp_http_uses_explicit_tls_context(monkeypatch) -> None:
@@ -421,9 +424,10 @@ def test_push_trace_to_otlp_http_uses_explicit_tls_context(monkeypatch) -> None:
         def read(self) -> bytes:
             return b"{}"
 
-    def fake_urlopen(request, timeout=None, context=None):
+    def fake_urlopen(request, timeout=None, context=None, pinned_ips=None):
         captured["url"] = request.full_url
         captured["context"] = context
+        captured["pinned_ips"] = pinned_ips
         return _FakeResponse()
 
     monkeypatch.setattr("agent_devtools.otel._open_otlp_request", fake_urlopen)
@@ -437,3 +441,4 @@ def test_push_trace_to_otlp_http_uses_explicit_tls_context(monkeypatch) -> None:
     assert result.ok is True
     assert captured["url"] == "https://localhost:4318/v1/traces"
     assert isinstance(captured["context"], ssl.SSLContext)
+    assert captured["pinned_ips"] == []

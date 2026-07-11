@@ -7,6 +7,7 @@ const TRACE_DB_VERSION = 2;
 const TRACE_STORE_NAME = 'imported-traces';
 const TRACE_KEY_STORE_NAME = 'crypto-keys';
 const TRACE_CONTENT_KEY_ID = 'trace-content-key';
+let pendingTraceContentKey: Promise<CryptoKey> | null = null;
 
 interface EncryptedTraceEnvelope {
   encrypted: true;
@@ -276,7 +277,22 @@ function openTraceDb(): Promise<IDBDatabase> {
   });
 }
 
-async function traceContentKey(db: IDBDatabase): Promise<CryptoKey> {
+function traceContentKey(db: IDBDatabase): Promise<CryptoKey> {
+  return getOrCreateSharedTraceContentKey(() => loadOrCreateTraceContentKey(db));
+}
+
+export function getOrCreateSharedTraceContentKey(loadOrCreate: () => Promise<CryptoKey>): Promise<CryptoKey> {
+  if (!pendingTraceContentKey) {
+    const pending = loadOrCreate();
+    pendingTraceContentKey = pending;
+    void pending.finally(() => {
+      if (pendingTraceContentKey === pending) pendingTraceContentKey = null;
+    });
+  }
+  return pendingTraceContentKey;
+}
+
+async function loadOrCreateTraceContentKey(db: IDBDatabase): Promise<CryptoKey> {
   const existing = await requestResult<CryptoKey | undefined>(
     db.transaction(TRACE_KEY_STORE_NAME, 'readonly').objectStore(TRACE_KEY_STORE_NAME).get(TRACE_CONTENT_KEY_ID),
   );

@@ -4,6 +4,7 @@ import {
   clearPersistedImportedTraces,
   decryptTraceForStorage,
   encryptTraceForStorage,
+  getOrCreateSharedTraceContentKey,
   loadPersistedImportedTraces,
   persistImportedTrace,
   type AsyncTraceContentStore,
@@ -239,4 +240,21 @@ await testAsync('trace storage encryption roundtrips without plaintext payload',
   assertEqual(rendered.includes('sk-live-secret123'), false, 'ciphertext hides token');
   assertEqual(rendered.includes('Use API key'), false, 'ciphertext hides task');
   assertEqual(finalOutput.token, 'sk-live-secret123', 'trace decrypts');
+});
+
+await testAsync('shared trace key initialization uses one in-flight promise', async () => {
+  let calls = 0;
+  let resolveKey: ((key: CryptoKey) => void) | undefined;
+  const created = new Promise<CryptoKey>((resolve) => { resolveKey = resolve; });
+  const loadOrCreate = () => {
+    calls += 1;
+    return created;
+  };
+
+  const first = getOrCreateSharedTraceContentKey(loadOrCreate);
+  const second = getOrCreateSharedTraceContentKey(loadOrCreate);
+  resolveKey?.(await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']));
+
+  assertEqual(calls, 1, 'one key creation runs');
+  assertEqual(await first, await second, 'both callers receive the same key');
 });

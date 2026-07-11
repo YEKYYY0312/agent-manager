@@ -27,6 +27,12 @@ def create_replay_trace(source: Trace, start_step_id: str, tool_mocks: list[dict
     source_steps = source.steps[start_index:]
     mock_by_step_id = _tool_mock_index(tool_mocks)
     replay_steps = [_replay_step(step, mock_by_step_id.get(step.id)) for step in source_steps]
+    replay_ids_by_source_id = {
+        source_step.id: replay_step.id
+        for source_step, replay_step in zip(source_steps, replay_steps)
+    }
+    for source_step, replay_step in zip(source_steps, replay_steps):
+        replay_step.parent_id = replay_ids_by_source_id.get(source_step.parent_id)
 
     labels = dict(source.run.labels)
     labels.update(
