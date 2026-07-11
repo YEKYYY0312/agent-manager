@@ -1,6 +1,7 @@
 import {
   DEFAULT_TAB,
   TRACE_CATALOG,
+  createTraceCatalog,
   getCompareTracePath,
   getDefaultTracePath,
   isWorkspaceTab,
@@ -37,6 +38,13 @@ test('workspace exposes Phase 10 tabs including experiment comparison', () => {
 test('trace catalog points at the shipped public traces', () => {
   assertEqual(TRACE_CATALOG.length, 2, 'trace count');
   assertEqual(getDefaultTracePath(), '/traces/sample-success.trace.json', 'default trace');
+});
+
+test('trace catalog uses the deployment base path for public traces', () => {
+  const catalog = createTraceCatalog('/agent-manager/');
+
+  assertEqual(catalog[0]?.path, '/agent-manager/traces/sample-success.trace.json', 'success trace path');
+  assertEqual(catalog[1]?.path, '/agent-manager/traces/sample-failure.trace.json', 'failure trace path');
 });
 
 test('diff compare path chooses another trace when possible', () => {

@@ -1,0 +1,47 @@
+name: Deploy Web UI to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: packages/web-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: packages/web-ui/package-lock.json
+      - run: npm ci --ignore-scripts --registry=https://registry.npmjs.org/
+      - run: npm run test:data
+      - run: npm run lint
+      - run: npm run build -- --base=/agent-manager/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/web-ui/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

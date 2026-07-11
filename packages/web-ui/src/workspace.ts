@@ -7,10 +7,20 @@ export interface TraceOption {
 
 export const DEFAULT_TAB: WorkspaceTab = 'timeline';
 
-export const TRACE_CATALOG: TraceOption[] = [
-  { path: '/traces/sample-success.trace.json', label: 'sample-success' },
-  { path: '/traces/sample-failure.trace.json', label: 'sample-failure' },
-];
+export const TRACE_CATALOG: TraceOption[] = createTraceCatalog();
+
+export function createTraceCatalog(baseUrl = import.meta.env?.BASE_URL ?? '/'): TraceOption[] {
+  const traceBasePath = getBundledTraceBasePath(baseUrl);
+  return [
+    { path: `${traceBasePath}sample-success.trace.json`, label: 'sample-success' },
+    { path: `${traceBasePath}sample-failure.trace.json`, label: 'sample-failure' },
+  ];
+}
+
+export function getBundledTraceBasePath(baseUrl = import.meta.env?.BASE_URL ?? '/'): string {
+  const normalizedBaseUrl = baseUrl.startsWith('/') ? baseUrl : `/${baseUrl}`;
+  return `${normalizedBaseUrl.endsWith('/') ? normalizedBaseUrl : `${normalizedBaseUrl}/`}traces/`;
+}
 
 export function isWorkspaceTab(value: string): value is WorkspaceTab {
   return value === 'timeline'

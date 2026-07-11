@@ -16,6 +16,7 @@ import type {
   TimelineItem,
   Trace,
 } from './types';
+import { getBundledTraceBasePath } from './workspace.ts';
 
 const emptyCost: Cost = {
   input_tokens: 0,
@@ -293,8 +294,9 @@ export function totalCost(steps: Trace['steps']): { totalTokens: number; costUsd
 }
 
 function tracePathForCli(tracePath: string, runId: string): string {
-  if (tracePath.startsWith('/traces/')) {
-    return `packages/web-ui/public/traces/${safeTraceFileName(tracePath.slice('/traces/'.length))}`;
+  const bundledTraceBasePath = getBundledTraceBasePath();
+  if (tracePath.startsWith(bundledTraceBasePath)) {
+    return `packages/web-ui/public/traces/${safeTraceFileName(tracePath.slice(bundledTraceBasePath.length))}`;
   }
   if (tracePath.startsWith('import:')) {
     const fileName = tracePath.split(':').at(-1) || `${runId}.trace.json`;
@@ -307,7 +309,7 @@ function tracePathForCli(tracePath: string, runId: string): string {
 }
 
 function safeTraceUrl(url: string): string {
-  if (!url.startsWith('/traces/')) {
+  if (!url.startsWith(getBundledTraceBasePath())) {
     throw new Error('Trace URL is not allowed. Only bundled /traces/*.trace.json files can be fetched.');
   }
   if (!url.endsWith('.trace.json') || url.includes('..') || hasWindowsPathSeparator(url)) {
