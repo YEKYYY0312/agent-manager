@@ -63,7 +63,7 @@ from agent_devtools.analysis import analyze
 from agent_devtools.experiment import compare_experiment
 from agent_devtools.replay_compare import compare_replay
 from agent_devtools.replay import _adapter_input, _find_start_index
-from agent_devtools.local import doctor, import_new_traces, initialize_workspace
+from agent_devtools.local import doctor, import_new_traces, initialize_workspace, record_external_audit
 from agent_devtools.mcp_server import serve as serve_mcp
 
 # ---------------------------------------------------------------------------
@@ -1041,6 +1041,32 @@ def command_mcp(args: argparse.Namespace) -> int:
     return serve_mcp(initialize_workspace(args.root))
 
 
+def command_audit(args: argparse.Namespace) -> int:
+    events = [{"name": name, "status": "success"} for name in args.event]
+    for value in args.error_event:
+        if "=" not in value:
+            raise SystemExit(f"Invalid error event, expected name=message: {value}")
+        name, message = value.split("=", 1)
+        name = name.strip()
+        if not name:
+            raise SystemExit(f"Invalid error event, expected name=message: {value}")
+        events.append({"name": name, "status": "error", "error": message.strip()})
+
+    trace = record_external_audit(initialize_workspace(args.root), task=args.task, events=events)
+    print(f"Audit trace written: {trace.run.id}")
+    return 0
+
+
+def command_mcp_config(args: argparse.Namespace) -> int:
+    descriptor = {
+        "name": "agent-devtools",
+        "command": "py",
+        "args": [str(Path(__file__).resolve()), "mcp", "--root", str(Path(args.root).absolute())],
+    }
+    print(json.dumps(descriptor, indent=2, ensure_ascii=False))
+    return 0
+
+
 def _parse_header_args(values: list[str] | None) -> dict[str, str]:
     headers: dict[str, str] = {}
     for value in values or []:
@@ -1080,6 +1106,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp = subparsers.add_parser("mcp", help="Serve local trace query tools over stdio MCP")
     p_mcp.add_argument("--root", default=".", help="Workspace directory")
     p_mcp.set_defaults(func=command_mcp)
+
+    p_audit = subparsers.add_parser("audit", help="Write an external audit trace for explicit visible operations")
+    p_audit.add_argument("task", help="Task name recorded in the audit trace")
+    p_audit.add_argument("--root", default=".", help="Workspace directory")
+    p_audit.add_argument("--event", action="append", default=[], help="Successful visible operation; may be repeated")
+    p_audit.add_argument("--error-event", action="append", default=[], help="Failed visible operation in name=message form; may be repeated")
+    p_audit.set_defaults(func=command_audit)
+
+    p_mcp_config = subparsers.add_parser("mcp-config", help="Print a generic stdio MCP server descriptor")
+    p_mcp_config.add_argument("--root", default=".", help="Workspace directory")
+    p_mcp_config.set_defaults(func=command_mcp_config)
 
     # list
     p_list = subparsers.add_parser("list", help="List trace files in a directory")

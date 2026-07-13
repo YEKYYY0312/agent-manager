@@ -92,9 +92,23 @@ Codex and other MCP clients can query the same local index through stdio:
 py packages\cli\agent_devtools_cli\main.py mcp
 ```
 
+Print a copyable generic stdio server descriptor for the current workspace:
+
+```powershell
+py packages\cli\agent_devtools_cli\main.py mcp-config --root .
+```
+
 The server provides `list_recent_traces`, `analyze_trace`, `compare_traces`, and
 `record_external_audit`. External audit records contain only operations explicitly
 provided by the caller; they do not capture model reasoning or hidden platform telemetry.
+
+You can also write an explicit external audit trace from the terminal. Repeat
+`--event` for successful visible operations and use `--error-event name=message`
+for failures:
+
+```powershell
+py packages\cli\agent_devtools_cli\main.py audit "Codex visible work" --event "run command" --error-event "read docs=403"
+```
 
 If you have not installed the editable package, use the source CLI path instead:
 

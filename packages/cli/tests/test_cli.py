@@ -163,7 +163,7 @@ class TestParser:
     def test_parser_has_all_commands(self) -> None:
         parser = build_parser()
         choices = list(parser._subparsers._group_actions[0].choices.keys())
-        for cmd in ["list", "show", "steps", "inspect", "cost", "diff", "replay", "replay-adapter", "replay-compare", "experiment", "regression-check", "redact", "privacy-scan", "otel-export", "otel-push", "store", "init", "doctor", "watch", "mcp"]:
+        for cmd in ["list", "show", "steps", "inspect", "cost", "diff", "replay", "replay-adapter", "replay-compare", "experiment", "regression-check", "redact", "privacy-scan", "otel-export", "otel-push", "store", "init", "doctor", "watch", "mcp", "audit", "mcp-config"]:
             assert cmd in choices
 
     def test_init_and_doctor_create_a_ready_local_workspace(self, capsys) -> None:
@@ -182,6 +182,18 @@ class TestParser:
             assert main(["watch", "--root", tmp, "--once"]) == 0
             assert "Imported trace" in capsys.readouterr().out
             assert main(["store", "list", "--db", str(root / ".agent-devtools" / "traces.db")]) == 0
+
+    def test_audit_records_explicit_events_and_mcp_config_is_json(self, capsys) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            assert main(["audit", "Codex visible work", "--root", tmp, "--event", "run command", "--error-event", "read docs=403"]) == 0
+            out = capsys.readouterr().out
+            assert "Audit trace written" in out
+            assert len(list((Path(tmp) / "traces").glob("*.trace.json"))) == 1
+
+            assert main(["mcp-config", "--root", tmp]) == 0
+            config = json.loads(capsys.readouterr().out)
+            assert config["name"] == "agent-devtools"
+            assert config["args"][-2:] == ["--root", tmp]
 
     def test_list_default_directory(self) -> None:
         parser = build_parser()

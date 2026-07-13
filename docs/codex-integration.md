@@ -9,7 +9,15 @@ py packages\cli\agent_devtools_cli\main.py init
 py packages\cli\agent_devtools_cli\main.py mcp
 ```
 
-Register that command as a stdio MCP server in the Codex environment. The server offers:
+Print a generic stdio server descriptor with an absolute CLI source path for the same workspace:
+
+```powershell
+py packages\cli\agent_devtools_cli\main.py mcp-config --root .
+```
+
+Register the returned command descriptor as a stdio MCP server in the Codex environment.
+The descriptor intentionally does not assume a particular Codex configuration-file schema.
+The server offers:
 
 - `list_recent_traces`: imports newly written `.trace.json` files and lists indexed runs.
 - `analyze_trace`: returns cost, latency, failure, retry, and loop analysis for one run.
@@ -27,3 +35,13 @@ py packages\cli\agent_devtools_cli\main.py watch
 Codex does not expose its hidden reasoning or internal telemetry to this project. Use
 `record_external_audit` only for explicit visible actions such as a command invocation,
 file edit, or task result.
+
+For a terminal-only workflow, `audit` writes the same type of external audit trace:
+
+```powershell
+py packages\cli\agent_devtools_cli\main.py audit "Codex visible work" --event "run command" --error-event "read docs=403"
+```
+
+`--event` can be repeated for successful visible operations. Repeat `--error-event`
+with `name=message` for failed visible operations. Neither option captures Codex
+reasoning or hidden platform telemetry.
