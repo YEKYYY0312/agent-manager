@@ -163,8 +163,25 @@ class TestParser:
     def test_parser_has_all_commands(self) -> None:
         parser = build_parser()
         choices = list(parser._subparsers._group_actions[0].choices.keys())
-        for cmd in ["list", "show", "steps", "inspect", "cost", "diff", "replay", "replay-adapter", "replay-compare", "experiment", "regression-check", "redact", "privacy-scan", "otel-export", "otel-push", "store"]:
+        for cmd in ["list", "show", "steps", "inspect", "cost", "diff", "replay", "replay-adapter", "replay-compare", "experiment", "regression-check", "redact", "privacy-scan", "otel-export", "otel-push", "store", "init", "doctor", "watch", "mcp"]:
             assert cmd in choices
+
+    def test_init_and_doctor_create_a_ready_local_workspace(self, capsys) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            assert main(["init", "--root", tmp]) == 0
+            assert (Path(tmp) / ".agent-devtools" / "config.json").exists()
+            assert main(["doctor", "--root", tmp]) == 0
+            assert "ready" in capsys.readouterr().out
+
+    def test_watch_once_imports_new_trace_into_local_store(self, capsys) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main(["init", "--root", tmp])
+            _write_trace(str(root / "traces"), _make_success_trace(), "incoming.trace.json")
+
+            assert main(["watch", "--root", tmp, "--once"]) == 0
+            assert "Imported trace" in capsys.readouterr().out
+            assert main(["store", "list", "--db", str(root / ".agent-devtools" / "traces.db")]) == 0
 
     def test_list_default_directory(self) -> None:
         parser = build_parser()

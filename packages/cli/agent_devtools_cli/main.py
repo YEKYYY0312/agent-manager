@@ -33,6 +33,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -45,6 +46,7 @@ from agent_devtools import (
     CallableAgentAdapter,
     Cost,
     Trace,
+    TraceStore,
     TraceWriter,
     RegressionThresholds,
     check_regression,
@@ -61,6 +63,8 @@ from agent_devtools.analysis import analyze
 from agent_devtools.experiment import compare_experiment
 from agent_devtools.replay_compare import compare_replay
 from agent_devtools.replay import _adapter_input, _find_start_index
+from agent_devtools.local import doctor, import_new_traces, initialize_workspace
+from agent_devtools.mcp_server import serve as serve_mcp
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -999,6 +1003,44 @@ def _sensitive_block_message(finding_count: int, action: str) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# local workspace
+# ---------------------------------------------------------------------------
+
+
+def command_init(args: argparse.Namespace) -> int:
+    config = initialize_workspace(args.root)
+    print(f"Initialized Agent DevTools workspace at {config.root}")
+    print(f"Trace directory: {config.trace_dir}")
+    print(f"Local store:     {config.db_path}")
+    return 0
+
+
+def command_doctor(args: argparse.Namespace) -> int:
+    report = doctor(args.root)
+    status = "ready" if report.ready else "not ready"
+    print(f"Agent DevTools: {status}")
+    print(f"Trace directory: {report.trace_dir} ({report.trace_count} trace files)")
+    print(f"Local store:     {report.db_path}")
+    return 0 if report.ready else 1
+
+
+def command_watch(args: argparse.Namespace) -> int:
+    config = initialize_workspace(args.root)
+    store = TraceStore(config.db_path, redaction=True)
+    while True:
+        imported = import_new_traces(config, store)
+        for run_id in imported:
+            print(f"Imported trace: {run_id}")
+        if args.once:
+            return 0
+        time.sleep(args.interval)
+
+
+def command_mcp(args: argparse.Namespace) -> int:
+    return serve_mcp(initialize_workspace(args.root))
+
+
 def _parse_header_args(values: list[str] | None) -> dict[str, str]:
     headers: dict[str, str] = {}
     for value in values or []:
@@ -1020,6 +1062,24 @@ def _parse_header_args(values: list[str] | None) -> dict[str, str]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-devtools", description="Inspect and compare Agent DevTools trace files")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    p_init = subparsers.add_parser("init", help="Create local trace workspace configuration")
+    p_init.add_argument("--root", default=".", help="Workspace directory")
+    p_init.set_defaults(func=command_init)
+
+    p_doctor = subparsers.add_parser("doctor", help="Check local trace workspace readiness")
+    p_doctor.add_argument("--root", default=".", help="Workspace directory")
+    p_doctor.set_defaults(func=command_doctor)
+
+    p_watch = subparsers.add_parser("watch", help="Import new trace files into the local store")
+    p_watch.add_argument("--root", default=".", help="Workspace directory")
+    p_watch.add_argument("--interval", type=float, default=1.0, help="Polling interval in seconds")
+    p_watch.add_argument("--once", action="store_true", help="Import once and exit")
+    p_watch.set_defaults(func=command_watch)
+
+    p_mcp = subparsers.add_parser("mcp", help="Serve local trace query tools over stdio MCP")
+    p_mcp.add_argument("--root", default=".", help="Workspace directory")
+    p_mcp.set_defaults(func=command_mcp)
 
     # list
     p_list = subparsers.add_parser("list", help="List trace files in a directory")

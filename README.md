@@ -71,6 +71,31 @@ py examples\simple-agent\demo.py
 agent-devtools list traces
 ```
 
+## Local Agent Manager
+
+Initialize a project-local workspace once. It creates `traces/` and keeps local
+configuration, import state, and the SQLite index in `.agent-devtools/`.
+
+```powershell
+py packages\cli\agent_devtools_cli\main.py init
+py packages\cli\agent_devtools_cli\main.py doctor
+py packages\cli\agent_devtools_cli\main.py watch --once
+```
+
+Run `agent-devtools watch` to keep importing newly written trace files into the
+local SQLite index. The watcher stores redacted copies, so local search remains
+safe by default.
+
+Codex and other MCP clients can query the same local index through stdio:
+
+```powershell
+py packages\cli\agent_devtools_cli\main.py mcp
+```
+
+The server provides `list_recent_traces`, `analyze_trace`, `compare_traces`, and
+`record_external_audit`. External audit records contain only operations explicitly
+provided by the caller; they do not capture model reasoning or hidden platform telemetry.
+
 If you have not installed the editable package, use the source CLI path instead:
 
 ```powershell
