@@ -51,8 +51,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -e ".[dev]"
+      - name: Generate deterministic regression fixtures
+        run: |
+          python -c "from agent_devtools import new_run; import json; trace = new_run('CI quality baseline'); open('baseline.trace.json', 'w', encoding='utf-8').write(json.dumps(trace.to_dict()))"
+          cp baseline.trace.json candidate.trace.json
       - name: Verify regression command and baseline contract
-        run: python packages/cli/agent_devtools_cli/main.py regression-check traces/16ae325515be.trace.json traces/16ae325515be.trace.json --json
+        run: python packages/cli/agent_devtools_cli/main.py regression-check baseline.trace.json candidate.trace.json --json
       - name: Evaluate quality smoke dataset
         run: python packages/cli/agent_devtools_cli/main.py evaluate eval/ci-smoke-dataset.json eval/ci-smoke-answers.json --output evaluation-report.json
       - uses: actions/upload-artifact@v4
