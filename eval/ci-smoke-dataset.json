@@ -1,0 +1,1 @@
+{"version":1,"name":"ci-smoke","cases":[{"id":"trace-contract","difficulty":"easy","expected_key_points":["trace","json"],"bad_answer_patterns":["unsupported"]}]}

@@ -17,6 +17,7 @@ py packages\cli\agent_devtools_cli\main.py mcp-config --root .
 
 Register the returned command descriptor as a stdio MCP server in the Codex environment.
 The descriptor intentionally does not assume a particular Codex configuration-file schema.
+After adding the descriptor, restart Codex so it discovers the new MCP server.
 The server offers:
 
 - `list_recent_traces`: imports newly written `.trace.json` files and lists indexed runs.

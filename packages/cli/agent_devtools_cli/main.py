@@ -61,6 +61,9 @@ from agent_devtools import (
 )
 from agent_devtools.analysis import analyze
 from agent_devtools.experiment import compare_experiment
+from agent_devtools.evaluation import Annotation, AnnotationStore, evaluate_dataset, load_answers, load_dataset
+from agent_devtools.team import PostgresTeamRepository
+from agent_devtools.team_api import create_postgres_server
 from agent_devtools.replay_compare import compare_replay
 from agent_devtools.replay import _adapter_input, _find_start_index
 from agent_devtools.local import doctor, import_new_traces, initialize_workspace, record_external_audit
@@ -1046,6 +1049,24 @@ def command_serve(args: argparse.Namespace) -> int:
     return serve_local_api(initialize_workspace(args.root), port=args.port)
 
 
+def command_team_serve(args: argparse.Namespace) -> int:
+    database_url = args.database_url or os.getenv("AGENT_DEVTOOLS_DATABASE_URL", "")
+    if not database_url:
+        raise SystemExit("team-serve requires --database-url or AGENT_DEVTOOLS_DATABASE_URL")
+    try:
+        server = create_postgres_server(PostgresTeamRepository(database_url), port=args.port)
+    except ModuleNotFoundError as exc:
+        raise SystemExit("team-serve requires the PostgreSQL extra: pip install 'agent-devtools-local[postgres]'") from exc
+    print(f"Team Trace API listening at http://127.0.0.1:{server.server_port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        server.server_close()
+    return 0
+
+
 def command_audit(args: argparse.Namespace) -> int:
     events = [{"name": name, "status": "success"} for name in args.event]
     for value in args.error_event:
@@ -1069,6 +1090,43 @@ def command_mcp_config(args: argparse.Namespace) -> int:
         "args": [str(Path(__file__).resolve()), "mcp", "--root", str(Path(args.root).absolute())],
     }
     print(json.dumps(descriptor, indent=2, ensure_ascii=False))
+    return 0
+
+
+def command_evaluate(args: argparse.Namespace) -> int:
+    try:
+        annotations = AnnotationStore(args.annotations).load() if args.annotations else []
+        report = evaluate_dataset(load_dataset(args.dataset), load_answers(args.answers), annotations=annotations, threshold=args.threshold)
+    except ValueError as exc:
+        raise SystemExit(f"Evaluation input error: {exc}") from exc
+    payload = report.to_dict()
+    if args.output:
+        output = Path(args.output); output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
+        print(f"Evaluation report written: {output}")
+    if args.json_output:
+        print(json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False))
+    else:
+        status = "PASS" if report.passed_cases == report.total_cases else "FAIL"
+        print(f"Evaluation: {status}")
+        print(f"Pass rate:  {report.passed_cases}/{report.total_cases} ({report.pass_rate:.0%})")
+        for cluster in report.failure_clusters: print(f"  {cluster.count}x {cluster.signature}")
+    return 0 if report.passed_cases == report.total_cases else 1
+
+
+def command_annotate(args: argparse.Namespace) -> int:
+    scores: dict[str, float] = {}
+    try:
+        for value in args.score:
+            name, separator, raw = value.partition("=")
+            if not separator or not name.strip() or name.strip() in scores: raise ValueError("scores must use unique dimension=value pairs")
+            score = float(raw)
+            if not 0 <= score <= 1: raise ValueError("scores must be between 0 and 1")
+            scores[name.strip()] = score
+        AnnotationStore(args.store).append(Annotation(case_id=args.case_id, reviewer=args.reviewer, scores=scores, note=args.note or ""))
+    except ValueError as exc:
+        raise SystemExit(f"Annotation input error: {exc}") from exc
+    print(f"Annotation recorded: {args.case_id} by {args.reviewer}")
     return 0
 
 
@@ -1117,6 +1175,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--port", type=int, default=8765, help="Loopback API port")
     p_serve.set_defaults(func=command_serve)
 
+    p_team_serve = subparsers.add_parser("team-serve", help="Serve PostgreSQL project Trace API on loopback")
+    p_team_serve.add_argument("--database-url", help="PostgreSQL URL; defaults to AGENT_DEVTOOLS_DATABASE_URL")
+    p_team_serve.add_argument("--port", type=int, default=8767, help="Loopback API port")
+    p_team_serve.set_defaults(func=command_team_serve)
+
     p_audit = subparsers.add_parser("audit", help="Write an external audit trace for explicit visible operations")
     p_audit.add_argument("task", help="Task name recorded in the audit trace")
     p_audit.add_argument("--root", default=".", help="Workspace directory")
@@ -1127,6 +1190,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp_config = subparsers.add_parser("mcp-config", help="Print a generic stdio MCP server descriptor")
     p_mcp_config.add_argument("--root", default=".", help="Workspace directory")
     p_mcp_config.set_defaults(func=command_mcp_config)
+
+    p_evaluate = subparsers.add_parser("evaluate", help="Batch-score answers against a versioned evaluation dataset")
+    p_evaluate.add_argument("dataset", help="Evaluation dataset JSON")
+    p_evaluate.add_argument("answers", help="Answer map JSON")
+    p_evaluate.add_argument("--annotations", help="Optional JSONL human annotation store")
+    p_evaluate.add_argument("--threshold", type=float, default=0.7, help="Minimum overall score per case")
+    p_evaluate.add_argument("--output", help="Write machine-readable JSON report")
+    p_evaluate.add_argument("--json", action="store_true", dest="json_output", help="Print machine-readable JSON report")
+    p_evaluate.set_defaults(func=command_evaluate)
+
+    p_annotate = subparsers.add_parser("annotate", help="Append a human evaluation annotation")
+    p_annotate.add_argument("store", help="JSONL annotation store")
+    p_annotate.add_argument("case_id")
+    p_annotate.add_argument("reviewer")
+    p_annotate.add_argument("--score", action="append", required=True, help="Dimension score as name=0..1; repeatable")
+    p_annotate.add_argument("--note")
+    p_annotate.set_defaults(func=command_annotate)
 
     # list
     p_list = subparsers.add_parser("list", help="List trace files in a directory")

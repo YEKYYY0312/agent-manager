@@ -699,6 +699,13 @@ body { margin: 0; min-height: 100vh; }
   flex-direction: column;
 }
 
+.evaluation-header { display: flex; justify-content: space-between; gap: 16px; align-items: start; margin-bottom: 16px; }
+.evaluation-header .btn input { display: none; }
+.evaluation-error { color: var(--err); font-size: 11px; margin: 10px 0; }
+.evaluation-grid { display: grid; grid-template-columns: minmax(240px, .7fr) minmax(360px, 1.3fr); gap: 12px; }
+.evaluation-section { background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: 6px; padding: 12px; min-width: 0; }
+.evaluation-section h3 { font-size: 10px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px; }
+
 .experiment-status {
   margin-bottom: 10px;
   text-align: center;

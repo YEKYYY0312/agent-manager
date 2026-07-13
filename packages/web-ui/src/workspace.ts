@@ -1,4 +1,4 @@
-export type WorkspaceTab = 'timeline' | 'analysis' | 'diff' | 'replay' | 'replayCompare' | 'experiment';
+export type WorkspaceTab = 'timeline' | 'analysis' | 'evaluation' | 'diff' | 'replay' | 'replayCompare' | 'experiment';
 
 export interface TraceOption {
   path: string;
@@ -25,6 +25,7 @@ export function getBundledTraceBasePath(baseUrl = import.meta.env?.BASE_URL ?? '
 export function isWorkspaceTab(value: string): value is WorkspaceTab {
   return value === 'timeline'
     || value === 'analysis'
+    || value === 'evaluation'
     || value === 'diff'
     || value === 'replay'
     || value === 'replayCompare'

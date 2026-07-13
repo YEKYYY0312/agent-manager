@@ -11,6 +11,7 @@ import { AnalysisView } from './AnalysisView';
 import { ReplayView } from './ReplayView';
 import { ReplayCompareView } from './ReplayCompareView';
 import { ExperimentView } from './ExperimentView';
+import { EvaluationView } from './EvaluationView';
 import {
   loadPersistedImportedTraces,
   persistImportedTrace,
@@ -24,7 +25,7 @@ import {
   getDefaultTracePath,
 } from './workspace';
 
-const TAB_LABELS: Record<WorkspaceTab, string> = {
+const TAB_LABELS: Partial<Record<WorkspaceTab, string>> = {
   replayCompare: '回放对比 Replay Compare',
   experiment: '实验对比 Experiment',
   timeline: '时间线 Timeline',
@@ -33,7 +34,7 @@ const TAB_LABELS: Record<WorkspaceTab, string> = {
   replay: '回放 Replay',
 };
 
-const TAB_ORDER: WorkspaceTab[] = ['timeline', 'analysis', 'diff', 'replay', 'replayCompare', 'experiment'];
+const TAB_ORDER: WorkspaceTab[] = ['timeline', 'analysis', 'evaluation', 'diff', 'replay', 'replayCompare', 'experiment'];
 
 function App() {
   const defaultPath = getDefaultTracePath();
@@ -201,7 +202,7 @@ function App() {
                     className={`view-tab ${tab === view ? 'active' : ''}`}
                     onClick={() => setView(tab)}
                   >
-                    {TAB_LABELS[tab]}
+                    {TAB_LABELS[tab] ?? 'Evaluation'}
                   </button>
                 ))}
               </div>
@@ -221,6 +222,8 @@ function App() {
                 {view === 'analysis' && costSummary && (
                   <AnalysisView cost={costSummary} steps={trace.steps} />
                 )}
+
+                {view === 'evaluation' && <EvaluationView />}
 
                 {view === 'diff' && (
                   <DiffView

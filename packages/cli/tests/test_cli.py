@@ -163,7 +163,7 @@ class TestParser:
     def test_parser_has_all_commands(self) -> None:
         parser = build_parser()
         choices = list(parser._subparsers._group_actions[0].choices.keys())
-        for cmd in ["list", "show", "steps", "inspect", "cost", "diff", "replay", "replay-adapter", "replay-compare", "experiment", "regression-check", "redact", "privacy-scan", "otel-export", "otel-push", "store", "init", "doctor", "watch", "mcp", "audit", "mcp-config", "serve"]:
+        for cmd in ["list", "show", "steps", "inspect", "cost", "diff", "replay", "replay-adapter", "replay-compare", "experiment", "regression-check", "redact", "privacy-scan", "otel-export", "otel-push", "store", "init", "doctor", "watch", "mcp", "audit", "mcp-config", "serve", "team-serve"]:
             assert cmd in choices
 
     def test_init_and_doctor_create_a_ready_local_workspace(self, capsys) -> None:
@@ -1213,6 +1213,41 @@ class TestStoreCommand:
 
             with pytest.raises(SystemExit, match="too many trace files"):
                 main(["store", "import", str(source), "--db", str(db), "--max-files", "1"])
+
+
+# ---------------------------------------------------------------------------
+# evaluate / annotate
+# ---------------------------------------------------------------------------
+
+
+class TestEvaluationCommands:
+    def test_evaluate_writes_json_report_and_fails_when_a_case_fails(self, tmp_path, capsys) -> None:
+        dataset = tmp_path / "dataset.json"
+        answers = tmp_path / "answers.json"
+        output = tmp_path / "report.json"
+        dataset.write_text(json.dumps({
+            "version": 1,
+            "name": "support",
+            "cases": [{"id": "answer", "difficulty": "easy", "expected_key_points": ["refund"]}],
+        }), encoding="utf-8")
+        answers.write_text(json.dumps({"answer": "missing"}), encoding="utf-8")
+
+        rc = main(["evaluate", str(dataset), str(answers), "--output", str(output)])
+
+        assert rc == 1
+        assert json.loads(output.read_text(encoding="utf-8"))["failure_clusters"][0]["signature"] == "missing_expected_key_point:refund"
+        assert "Evaluation: FAIL" in capsys.readouterr().out
+
+    def test_annotate_persists_human_scores(self, tmp_path, capsys) -> None:
+        store = tmp_path / "annotations.jsonl"
+
+        rc = main(["annotate", str(store), "answer", "alice", "--score", "accuracy=0.8", "--score", "completeness=0.6"])
+
+        assert rc == 0
+        data = json.loads(store.read_text(encoding="utf-8"))
+        assert data["reviewer"] == "alice"
+        assert data["scores"] == {"accuracy": 0.8, "completeness": 0.6}
+        assert "Annotation recorded" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
