@@ -13,7 +13,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test:data": "node --experimental-strip-types src/trace.test.ts && node --experimental-strip-types src/workspace.test.ts && node --experimental-strip-types src/storage.test.ts",
+    "test:data": "node --experimental-strip-types src/trace.test.ts && node --experimental-strip-types src/workspace.test.ts && node --experimental-strip-types src/storage.test.ts && node --experimental-strip-types src/local.test.ts && node --experimental-strip-types src/devCsp.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

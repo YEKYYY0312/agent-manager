@@ -6,7 +6,7 @@ __version__ = "0.1.0"
 
 from .adapters import AdapterRunResult, AgentAdapter, AnthropicAdapter, CallableAgentAdapter, LangGraphAdapter, OpenAIAdapter
 from .context import TraceContext, current_step, current_trace
-from .decorators import traced_model, traced_step, traced_tool
+from .decorators import traced_agent, traced_model, traced_step, traced_tool
 from .experiment import compare_experiment
 from .otel import OtlpHttpExportError, OtlpHttpExportResult, push_trace_to_otlp_http, trace_to_otlp_json, write_otlp_json
 from .redaction import RedactionConfig, SecretFinding, redact_trace, redact_value, scan_trace_for_secrets, scan_value_for_secrets
@@ -50,6 +50,7 @@ __all__ = [
     "current_trace",
     "current_step",
     "traced_model",
+    "traced_agent",
     "traced_step",
     "traced_tool",
     "create_replay_trace",

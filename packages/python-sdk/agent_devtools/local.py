@@ -38,6 +38,8 @@ def initialize_workspace(root: str | Path = ".") -> LocalWorkspace:
     config = LocalWorkspace(root_path, trace_dir, state_dir / "traces.db", state_dir / "config.json", state_dir / "import-state.json")
     if not config.config_path.exists():
         config.config_path.write_text(json.dumps({"version": 1, "trace_dir": "traces", "db_path": ".agent-devtools/traces.db"}, indent=2) + "\n", encoding="utf-8")
+    if not any(trace_dir.glob("*.trace.json")):
+        _write_example_trace(trace_dir)
     return config
 
 
@@ -60,7 +62,12 @@ def import_new_traces(config: LocalWorkspace, store: TraceStore | None = None) -
         fingerprint = f"{stat.st_mtime_ns}:{stat.st_size}"
         if fingerprints.get(path.name) == fingerprint:
             continue
-        trace = Trace.from_file(str(path))
+        try:
+            trace = Trace.from_file(str(path))
+        except (OSError, ValueError):
+            # A partial or malformed file must not block discovery of later traces.
+            fingerprints[path.name] = fingerprint
+            continue
         trace_store.upsert_trace(trace, source_path=path)
         fingerprints[path.name] = fingerprint
         imported.append(trace.run.id)
@@ -91,3 +98,16 @@ def _read_state(path: Path) -> dict[str, str]:
 
 def _write_state(path: Path, fingerprints: dict[str, str]) -> None:
     path.write_text(json.dumps(fingerprints, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _write_example_trace(trace_dir: Path) -> None:
+    trace = new_run(
+        "Explore the Agent DevTools example Trace",
+        labels={"source": "agent-devtools-example", "sample": "true"},
+    )
+    trace.run.id = "agent-devtools-example"
+    step = Step(type="planner", name="Review example Trace", replayable=False)
+    step.complete(status="success", output="Open this Trace in the local workbench to inspect the run.")
+    trace.add_step(step)
+    trace.run.complete(status="success", final_output="Example Trace ready.")
+    TraceWriter(trace_dir, redaction=True).write(trace)

@@ -21,6 +21,7 @@ from agent_devtools import (
     TraceWriter,
     new_run,
     traced_model,
+    traced_agent,
     traced_step,
     traced_tool,
 )
@@ -634,6 +635,18 @@ class TestTraceContext:
 
 
 class TestDecorators:
+    def test_traced_agent_creates_a_top_level_trace_without_manual_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+
+            @traced_agent("Decorated agent run", output_dir=tmp)
+            def run_agent(question: str) -> dict:
+                return {"answer": question}
+
+            assert run_agent("ready") == {"answer": "ready"}
+            trace = Trace.from_file(str(next(Path(tmp).glob("*.trace.json"))))
+            assert trace.run.task == "Decorated agent run"
+            assert trace.run.final_output == {"answer": "ready"}
+
     def test_traced_step_outside_context_is_noop(self) -> None:
         @traced_step("planner", "plan")
         def plan(task: str) -> str:

@@ -73,8 +73,9 @@ agent-devtools list traces
 
 ## Local Agent Manager
 
-Initialize a project-local workspace once. It creates `traces/` and keeps local
-configuration, import state, and the SQLite index in `.agent-devtools/`.
+Initialize a project-local workspace once. It creates `traces/`, writes one
+example Trace, and keeps local configuration, import state, and the SQLite index
+in `.agent-devtools/`.
 
 ```powershell
 py packages\cli\agent_devtools_cli\main.py init
@@ -85,6 +86,21 @@ py packages\cli\agent_devtools_cli\main.py watch --once
 Run `agent-devtools watch` to keep importing newly written trace files into the
 local SQLite index. The watcher stores redacted copies, so local search remains
 safe by default.
+
+For the local Web UI, start the loopback API in one terminal. It imports new
+Trace files whenever the UI requests data and serves only redacted SQLite data:
+
+```powershell
+py packages\cli\agent_devtools_cli\main.py serve --root .
+```
+
+Then start Vite in another terminal. The workbench automatically shows the latest
+local Trace; the GitHub Pages deployment continues to use bundled sample traces.
+
+```powershell
+cd packages\web-ui
+npm run dev
+```
 
 Codex and other MCP clients can query the same local index through stdio:
 

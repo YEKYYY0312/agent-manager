@@ -163,7 +163,7 @@ class TestParser:
     def test_parser_has_all_commands(self) -> None:
         parser = build_parser()
         choices = list(parser._subparsers._group_actions[0].choices.keys())
-        for cmd in ["list", "show", "steps", "inspect", "cost", "diff", "replay", "replay-adapter", "replay-compare", "experiment", "regression-check", "redact", "privacy-scan", "otel-export", "otel-push", "store", "init", "doctor", "watch", "mcp", "audit", "mcp-config"]:
+        for cmd in ["list", "show", "steps", "inspect", "cost", "diff", "replay", "replay-adapter", "replay-compare", "experiment", "regression-check", "redact", "privacy-scan", "otel-export", "otel-push", "store", "init", "doctor", "watch", "mcp", "audit", "mcp-config", "serve"]:
             assert cmd in choices
 
     def test_init_and_doctor_create_a_ready_local_workspace(self, capsys) -> None:
@@ -188,7 +188,7 @@ class TestParser:
             assert main(["audit", "Codex visible work", "--root", tmp, "--event", "run command", "--error-event", "read docs=403"]) == 0
             out = capsys.readouterr().out
             assert "Audit trace written" in out
-            assert len(list((Path(tmp) / "traces").glob("*.trace.json"))) == 1
+            assert len(list((Path(tmp) / "traces").glob("*.trace.json"))) == 2
 
             assert main(["mcp-config", "--root", tmp]) == 0
             config = json.loads(capsys.readouterr().out)

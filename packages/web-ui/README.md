@@ -4,13 +4,24 @@ React + TypeScript + Vite workbench for visual trace inspection.
 
 ## Start Locally
 
+From the repository root, start the local Trace API:
+
+```powershell
+py packages\cli\agent_devtools_cli\main.py serve --root .
+```
+
+Then start Vite in a second terminal:
+
 ```powershell
 cd packages\web-ui
 npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite, usually `http://127.0.0.1:5173/`.
+Open the local URL printed by Vite, usually `http://127.0.0.1:5173/`. The Trace
+Picker automatically shows the latest records from `.agent-devtools/traces.db`.
+When the local API is unavailable, the static deployment falls back to bundled
+sample traces and browser-imported files.
 
 ## Views
 
@@ -29,6 +40,7 @@ The browser data layer lives in:
 - `src/types.ts`
 - `src/trace.ts`
 - `src/workspace.ts`
+- `src/local.ts`
 
 Important APIs:
 
@@ -41,6 +53,8 @@ Important APIs:
 - `compareExperiment(left, right)`
 - `loadPersistedImportedTraces(storage)`
 - `appendPersistedImportedTrace(option, trace, storage)`
+- `loadLocalTraceCatalog()`
+- `loadLocalTrace(path)`
 
 Rules:
 

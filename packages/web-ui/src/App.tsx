@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Trace } from './types';
 import { computeCostSummary, loadTrace, loadTraceFromFile } from './trace';
+import { isLocalTracePath, loadLocalTrace, loadLocalTraceCatalog } from './local';
 import { Timeline } from './Timeline';
 import { StepInspector } from './StepInspector';
 import { SummaryBar } from './SummaryBar';
@@ -44,6 +45,7 @@ function App() {
   const [view, setView] = useState<WorkspaceTab>(DEFAULT_TAB);
   const [importedTraces, setImportedTraces] = useState<TraceOption[]>(persistedImports.options);
   const [importedTraceMap, setImportedTraceMap] = useState<Record<string, Trace>>(persistedImports.traceMap);
+  const [localTraces, setLocalTraces] = useState<TraceOption[]>([]);
   const [dropActive, setDropActive] = useState(false);
 
   useEffect(() => {
@@ -57,8 +59,8 @@ function App() {
   }, [persistedImports]);
 
   const allOptions = useMemo(
-    () => [...TRACE_CATALOG, ...importedTraces],
-    [importedTraces],
+    () => [...localTraces, ...TRACE_CATALOG, ...importedTraces],
+    [importedTraces, localTraces],
   );
 
   const comparePath = useMemo(
@@ -72,6 +74,7 @@ function App() {
     if (path.startsWith('import:')) {
       throw new Error('Imported trace content is not persisted. Please import the file again.');
     }
+    if (isLocalTracePath(path)) return loadLocalTrace(path);
     return loadTrace(path);
   }, [importedTraceMap]);
 
@@ -128,11 +131,28 @@ function App() {
     let cancelled = false;
     (async () => {
       try {
+        const options = await loadLocalTraceCatalog();
+        if (!cancelled) setLocalTraces(options);
+      } catch {
+        // The static GitHub Pages build has no local API and uses bundled traces.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
         setError(null);
-        const initialTrace = await loadTrace(defaultPath);
+        const localOptions = await loadLocalTraceCatalog().catch(() => []);
+        const initialPath = localOptions[0]?.path ?? defaultPath;
+        const initialTrace = isLocalTracePath(initialPath)
+          ? await loadLocalTrace(initialPath)
+          : await loadTrace(initialPath);
         if (cancelled) return;
         setTrace(initialTrace);
-        setTracePath(defaultPath);
+        setTracePath(initialPath);
         setSelectedStepId(null);
       } catch (e) {
         if (!cancelled) setError(String(e));

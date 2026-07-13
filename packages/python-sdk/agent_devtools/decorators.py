@@ -27,11 +27,38 @@ import sys
 import time
 from typing import Any, Callable
 
-from .context import current_trace
+from .context import TraceContext, current_trace
 from .redaction import redact_value
 from .trace import Cost, Error as TraceError, Step, StepType, ToolCall
 
 DEFAULT_MAX_DECORATOR_PAYLOAD_BYTES = 1024 * 1024
+
+
+def traced_agent(
+    task: str = "",
+    *,
+    output_dir: str = "traces",
+    labels: dict[str, str] | None = None,
+) -> Callable:
+    """Record one top-level agent function without manually opening a context.
+
+    Nested calls keep using an already active :class:`TraceContext`, so this
+    decorator composes with framework adapters and the step decorators.
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            if current_trace() is not None:
+                return fn(*args, **kwargs)
+            with TraceContext(task=task or fn.__name__, labels=dict(labels or {}), output_dir=output_dir) as ctx:
+                result = fn(*args, **kwargs)
+                ctx.trace.run.complete(status="success", final_output=_serialize_output(result))
+                return result
+
+        return wrapper
+
+    return decorator
 
 
 def traced_step(

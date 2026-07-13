@@ -15,6 +15,7 @@ This installs both the SDK import package and the `agent-devtools` CLI entry poi
 ## Main APIs
 
 - `TraceContext`
+- `traced_agent`
 - `traced_step`
 - `traced_tool`
 - `traced_model`
@@ -50,6 +51,22 @@ with TraceContext(task="Answer weather question") as ctx:
 ```
 
 The trace is written to `traces/` by default when the context exits.
+
+For a top-level agent function, use `@traced_agent(...)` instead of opening a
+`TraceContext` manually. Inner `@traced_tool`, `@traced_model`, and
+`@traced_step` calls attach to the same run:
+
+```python
+from agent_devtools import traced_agent, traced_tool
+
+@traced_tool("weather.lookup")
+def lookup(city: str) -> dict:
+    return {"city": city, "summary": "Warm"}
+
+@traced_agent("Answer weather question")
+def run_agent(city: str) -> dict:
+    return lookup(city)
+```
 
 Enable write-time redaction when traces may contain secrets:
 

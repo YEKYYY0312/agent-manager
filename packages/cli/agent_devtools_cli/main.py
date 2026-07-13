@@ -64,6 +64,7 @@ from agent_devtools.experiment import compare_experiment
 from agent_devtools.replay_compare import compare_replay
 from agent_devtools.replay import _adapter_input, _find_start_index
 from agent_devtools.local import doctor, import_new_traces, initialize_workspace, record_external_audit
+from agent_devtools.local_api import serve as serve_local_api
 from agent_devtools.mcp_server import serve as serve_mcp
 
 # ---------------------------------------------------------------------------
@@ -1041,6 +1042,10 @@ def command_mcp(args: argparse.Namespace) -> int:
     return serve_mcp(initialize_workspace(args.root))
 
 
+def command_serve(args: argparse.Namespace) -> int:
+    return serve_local_api(initialize_workspace(args.root), port=args.port)
+
+
 def command_audit(args: argparse.Namespace) -> int:
     events = [{"name": name, "status": "success"} for name in args.event]
     for value in args.error_event:
@@ -1106,6 +1111,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp = subparsers.add_parser("mcp", help="Serve local trace query tools over stdio MCP")
     p_mcp.add_argument("--root", default=".", help="Workspace directory")
     p_mcp.set_defaults(func=command_mcp)
+
+    p_serve = subparsers.add_parser("serve", help="Serve locally indexed traces to the Web UI over loopback HTTP")
+    p_serve.add_argument("--root", default=".", help="Workspace directory")
+    p_serve.add_argument("--port", type=int, default=8765, help="Loopback API port")
+    p_serve.set_defaults(func=command_serve)
 
     p_audit = subparsers.add_parser("audit", help="Write an external audit trace for explicit visible operations")
     p_audit.add_argument("task", help="Task name recorded in the audit trace")
