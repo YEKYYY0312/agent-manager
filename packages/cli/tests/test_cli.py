@@ -110,6 +110,12 @@ class _CaptureHandler(BaseHTTPRequestHandler):
     status_code = 200
     response_body = b"{}"
 
+    def do_GET(self) -> None:
+        self.send_response(type(self).status_code)
+        self.send_header("content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(type(self).response_body)
+
     def do_POST(self) -> None:
         length = int(self.headers.get("content-length", "0"))
         body = self.rfile.read(length)
@@ -153,6 +159,11 @@ class _CaptureServer:
         return f"http://{host}:{port}/v1/traces"
 
     @property
+    def base_url(self) -> str:
+        host, port = self.httpd.server_address
+        return f"http://{host}:{port}"
+
+    @property
     def requests(self) -> list[dict[str, Any]]:
         return self.handler.requests
 
@@ -172,12 +183,244 @@ class TestParser:
     def test_parser_has_all_commands(self) -> None:
         parser = build_parser()
         choices = list(parser._subparsers._group_actions[0].choices.keys())
-        for cmd in ["list", "show", "steps", "inspect", "cost", "diff", "replay", "replay-adapter", "replay-claude-code", "replay-compare", "experiment", "regression-check", "redact", "privacy-scan", "otel-export", "otel-push", "store", "init", "doctor", "watch", "mcp", "audit", "mcp-config", "serve", "team-serve"]:
+        for cmd in ["list", "show", "steps", "inspect", "cost", "diff", "replay", "replay-adapter", "replay-claude-code", "replay-compare", "experiment", "regression-check", "redact", "privacy-scan", "otel-export", "otel-push", "store", "init", "doctor", "watch", "mcp", "audit", "mcp-config", "serve", "start", "health", "team-serve"]:
             assert cmd in choices
 
     def test_serve_uses_windows_safe_default_port(self) -> None:
         args = build_parser().parse_args(["serve"])
         assert args.port == 8791
+
+    def test_start_and_health_use_local_service_defaults(self) -> None:
+        start = build_parser().parse_args(["start"])
+        health = build_parser().parse_args(["health"])
+
+        assert (start.api_port, start.web_port, start.startup_timeout) == (8791, 5175, 20.0)
+        assert (health.api_port, health.web_port) == (8791, 5175)
+
+    def test_health_reports_api_and_web_status(self, monkeypatch, capsys) -> None:
+        states = {
+            "http://127.0.0.1:8791/api/health": (True, "ready"),
+            "http://127.0.0.1:5175/": (False, "connection refused"),
+        }
+        monkeypatch.setattr(cli_main, "_probe_http", lambda url: states[url])
+
+        result = cli_main.command_health(_arg({"api_port": 8791, "web_port": 5175}))
+
+        assert result == 1
+        output = capsys.readouterr().out
+        assert "API: ready" in output
+        assert "Web: unavailable (connection refused)" in output
+
+    def test_start_reuses_healthy_services_without_spawning(self, monkeypatch, capsys) -> None:
+        monkeypatch.setattr(cli_main, "_probe_http", lambda url: (True, "ready"))
+        monkeypatch.setattr(
+            cli_main.subprocess,
+            "Popen",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not spawn")),
+        )
+
+        result = cli_main.command_start(
+            _arg({"root": ".", "api_port": 8791, "web_port": 5175, "startup_timeout": 20.0})
+        )
+
+        assert result == 0
+        assert "already running" in capsys.readouterr().out
+
+    def test_probe_http_rejects_an_unexpected_api_response(self) -> None:
+        with _CaptureServer(response_body=b"{}") as server:
+            ready, detail = cli_main._probe_http(f"{server.base_url}/api/health")
+
+        assert ready is False
+        assert detail == "unexpected response"
+
+    def test_start_rejects_a_port_owned_by_another_service(self, monkeypatch) -> None:
+        monkeypatch.setattr(cli_main, "_probe_http", lambda url: (False, "unexpected response"))
+        monkeypatch.setattr(cli_main, "_port_is_open", lambda port: port == 8791)
+
+        with pytest.raises(SystemExit, match="API port 8791"):
+            cli_main.command_start(
+                _arg({"root": ".", "api_port": 8791, "web_port": 5175, "startup_timeout": 20.0})
+            )
+
+    def test_start_requires_the_web_ui_package(self, monkeypatch, tmp_path) -> None:
+        monkeypatch.setattr(cli_main, "_probe_http", lambda url: (False, "connection refused"))
+        monkeypatch.setattr(cli_main, "_port_is_open", lambda port: False)
+
+        with pytest.raises(SystemExit, match="packages.web-ui.package.json"):
+            cli_main.command_start(
+                _arg({"root": str(tmp_path), "api_port": 8791, "web_port": 5175, "startup_timeout": 20.0})
+            )
+
+    def test_start_requires_npm_before_spawning(self, monkeypatch, tmp_path) -> None:
+        web_root = tmp_path / "packages" / "web-ui"
+        web_root.mkdir(parents=True)
+        (web_root / "package.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(cli_main, "_probe_http", lambda url: (False, "connection refused"))
+        monkeypatch.setattr(cli_main, "_port_is_open", lambda port: False)
+        monkeypatch.setattr(cli_main.shutil, "which", lambda name: None)
+        monkeypatch.setattr(
+            cli_main.subprocess,
+            "Popen",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not spawn")),
+        )
+
+        with pytest.raises(SystemExit, match="npm is required"):
+            cli_main.command_start(
+                _arg({"root": str(tmp_path), "api_port": 8791, "web_port": 5175, "startup_timeout": 20.0})
+            )
+
+    def test_start_spawns_expected_commands_and_cleans_up_on_interrupt(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        web_root = tmp_path / "packages" / "web-ui"
+        web_root.mkdir(parents=True)
+        (web_root / "package.json").write_text("{}", encoding="utf-8")
+        processes = []
+        calls = []
+        taskkill_calls = []
+
+        class FakeProcess:
+            def __init__(self) -> None:
+                self.pid = 1000 + len(processes)
+                self.terminated = False
+                self.killed = False
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                self.terminated = True
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                self.killed = True
+
+        def fake_popen(command, **kwargs):
+            process = FakeProcess()
+            processes.append(process)
+            calls.append((command, kwargs))
+            return process
+
+        monkeypatch.setattr(
+            cli_main,
+            "_probe_http",
+            lambda url: (len(processes) == 2, "ready" if len(processes) == 2 else "connection refused"),
+        )
+        monkeypatch.setattr(cli_main, "_port_is_open", lambda port: False)
+        monkeypatch.setattr(cli_main.shutil, "which", lambda name: "C:\\tools\\npm.cmd" if name == "npm.cmd" else None)
+        monkeypatch.setattr(cli_main.subprocess, "Popen", fake_popen)
+        monkeypatch.setattr(
+            cli_main.subprocess,
+            "run",
+            lambda command, **kwargs: taskkill_calls.append(command),
+        )
+        monkeypatch.setattr(cli_main.time, "sleep", lambda seconds: (_ for _ in ()).throw(KeyboardInterrupt()))
+
+        with pytest.raises(KeyboardInterrupt):
+            cli_main.command_start(
+                _arg({"root": str(tmp_path), "api_port": 8792, "web_port": 5176, "startup_timeout": 20.0})
+            )
+
+        assert len(calls) == 2
+        assert calls[0][0][-4:] == ["--root", str(tmp_path.resolve()), "--port", "8792"]
+        assert calls[1][0] == [
+            "C:\\tools\\npm.cmd",
+            "--prefix",
+            str(web_root),
+            "run",
+            "dev",
+            "--",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "5176",
+        ]
+        assert calls[1][1]["env"]["AGENT_DEVTOOLS_API_URL"] == "http://127.0.0.1:8792"
+        assert taskkill_calls == [
+            ["taskkill", "/PID", "1000", "/T", "/F"],
+            ["taskkill", "/PID", "1001", "/T", "/F"],
+        ]
+
+    def test_start_times_out_and_cleans_up_children(self, monkeypatch, tmp_path) -> None:
+        web_root = tmp_path / "packages" / "web-ui"
+        web_root.mkdir(parents=True)
+        (web_root / "package.json").write_text("{}", encoding="utf-8")
+        processes = []
+        taskkill_calls = []
+
+        class FakeProcess:
+            terminated = False
+
+            def __init__(self):
+                self.pid = 2000 + len(processes)
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                self.terminated = True
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                raise AssertionError("terminate should be enough")
+
+        def fake_popen(*args, **kwargs):
+            process = FakeProcess()
+            processes.append(process)
+            return process
+
+        ticks = iter([0.0, 2.0])
+        monkeypatch.setattr(cli_main, "_probe_http", lambda url: (False, "connection refused"))
+        monkeypatch.setattr(cli_main, "_port_is_open", lambda port: False)
+        monkeypatch.setattr(cli_main.shutil, "which", lambda name: "npm.cmd")
+        monkeypatch.setattr(cli_main.subprocess, "Popen", fake_popen)
+        monkeypatch.setattr(
+            cli_main.subprocess,
+            "run",
+            lambda command, **kwargs: taskkill_calls.append(command),
+        )
+        monkeypatch.setattr(cli_main.time, "monotonic", lambda: next(ticks))
+
+        with pytest.raises(SystemExit, match="did not become ready"):
+            cli_main.command_start(
+                _arg({"root": str(tmp_path), "api_port": 8792, "web_port": 5176, "startup_timeout": 1.0})
+            )
+
+        assert len(processes) == 2
+        assert taskkill_calls == [
+            ["taskkill", "/PID", "2000", "/T", "/F"],
+            ["taskkill", "/PID", "2001", "/T", "/F"],
+        ]
+
+    @pytest.mark.skipif(os.name != "nt", reason="Windows process-tree cleanup")
+    def test_stop_processes_uses_taskkill_for_windows_process_trees(self, monkeypatch) -> None:
+        commands = []
+
+        class FakeProcess:
+            pid = 4321
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                raise AssertionError("Windows cleanup must stop the full process tree")
+
+            def wait(self, timeout=None):
+                return 0
+
+        monkeypatch.setattr(
+            cli_main.subprocess,
+            "run",
+            lambda command, **kwargs: commands.append((command, kwargs)),
+        )
+
+        cli_main._stop_processes([("Web", FakeProcess())])
+
+        assert commands[0][0] == ["taskkill", "/PID", "4321", "/T", "/F"]
 
     def test_init_and_doctor_create_a_ready_local_workspace(self, capsys) -> None:
         with tempfile.TemporaryDirectory() as tmp:

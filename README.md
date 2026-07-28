@@ -99,20 +99,23 @@ Run `agent-devtools watch` to keep importing newly written trace files into the
 local SQLite index. The watcher stores redacted copies, so local search remains
 safe by default.
 
-For the local Web UI, start the loopback API in one terminal. It imports new
-Trace files whenever the UI requests data and serves only redacted SQLite data:
+Start the loopback API and Web UI together from the repository root. The command
+reuses healthy services, waits for both endpoints, and stops only the child
+processes it created when you press Ctrl+C:
 
 ```powershell
-py packages\cli\agent_devtools_cli\main.py serve --root .
+py packages\cli\agent_devtools_cli\main.py start --root .
 ```
 
-Then start Vite in another terminal. The workbench automatically shows the latest
-local Trace; the GitHub Pages deployment continues to use bundled sample traces.
+Open `http://127.0.0.1:5175/`. Check both services from another terminal with:
 
 ```powershell
-cd packages\web-ui
-npm run dev
+py packages\cli\agent_devtools_cli\main.py health
 ```
+
+The API defaults to `127.0.0.1:8791`; the Web UI defaults to
+`127.0.0.1:5175`. Use `serve` and `npm run dev` separately only when debugging
+the two services.
 
 Codex and other MCP clients can query the same local index through stdio:
 
@@ -248,14 +251,15 @@ Set this environment variable to make SDK writes redact automatically:
 $env:AGENT_DEVTOOLS_REDACT_ON_WRITE = "true"
 ```
 
-Run the Web UI:
+Run only the Web UI when debugging it separately:
 
 ```powershell
 cd packages\web-ui
 npm run dev
 ```
 
-Open the local URL printed by Vite. The Web UI loads sample traces from `packages/web-ui/public/traces/`, and it can import local `.trace.json` files from the Trace list.
+For normal local use, prefer `agent-devtools start`. When Vite is run separately,
+open the local URL it prints. The Web UI loads sample traces from `packages/web-ui/public/traces/`, and it can import local `.trace.json` files from the Trace list.
 Imported trace contents are encrypted with browser Web Crypto AES-GCM before they are stored in IndexedDB, so refreshes can reopen previously imported traces without keeping trace JSON plaintext in browser storage. localStorage stores only lightweight import metadata.
 
 ## Verification

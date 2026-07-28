@@ -27,21 +27,29 @@ agent-devtools doctor
 
 ## 2. 启动本地查看器
 
-终端 A 启动本地数据 API：
+在 Agent DevTools 仓库根目录执行一条命令，同时启动本地数据 API 和 Web UI：
 
 ```powershell
-cd C:\path\to\your-agent-project
-agent-devtools serve --root . --port 8766
+cd C:\path\to\agent-manager
+agent-devtools start --root .
 ```
 
-终端 B 启动 Agent Manager 的 Web UI：
+打开 `http://127.0.0.1:5175/`。另开一个终端可检查两个服务是否正常：
 
 ```powershell
-cd C:\path\to\agent-manager\packages\web-ui
-npm run dev
+agent-devtools health
 ```
 
-打开 Vite 输出的本地地址，例如 `http://127.0.0.1:5174/`。页面会通过 loopback API 自动发现 `traces/` 中的新文件，并读取已脱敏的本地索引。GitHub Pages 是静态页面，不能自动读取你电脑的 Trace；在那里只能手动导入文件。
+`start` 默认使用 API 端口 `8791` 和 Web 端口 `5175`；服务已经健康时会直接复用，不会重复启动。按 `Ctrl+C` 时，只停止本次命令创建的进程。页面会通过 loopback API 自动发现 `traces/` 中的新文件，并读取已脱敏的本地索引。
+
+若需要分别排查 API 和 Web，可在两个终端手动执行：
+
+```powershell
+agent-devtools serve --root . --port 8791
+npm --prefix packages\web-ui run dev -- --host 127.0.0.1 --port 5175
+```
+
+GitHub Pages 是静态页面，不能自动读取你电脑的 Trace；在那里只能手动导入文件。
 
 ## 3. 记录真实 Python Agent
 

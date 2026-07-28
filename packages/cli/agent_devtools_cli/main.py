@@ -32,6 +32,7 @@ import importlib.util
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -98,6 +99,66 @@ def _fmt_ms(value: float | None) -> str:
     if value is None:
         return "n/a"
     return f"{value:.0f}ms"
+
+
+def _probe_http(url: str) -> tuple[bool, str]:
+    try:
+        with urlopen(url, timeout=2) as response:
+            status = response.status
+            body = response.read(65536)
+    except (HTTPError, URLError, OSError) as exc:
+        return False, str(exc.reason if isinstance(exc, URLError) else exc)
+    if not 200 <= status < 300:
+        return False, f"HTTP {status}"
+
+    path = urlsplit(url).path
+    if path == "/api/health":
+        try:
+            healthy = json.loads(body).get("ok") is True
+        except (AttributeError, json.JSONDecodeError, UnicodeDecodeError):
+            healthy = False
+    else:
+        healthy = "<title>Agent DevTools</title>" in body.decode("utf-8", errors="replace")
+    return (True, "ready") if healthy else (False, "unexpected response")
+
+
+def _port_is_open(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
+def _stop_processes(processes: list[tuple[str, subprocess.Popen]]) -> None:
+    if os.name == "nt":
+        for _, process in processes:
+            if process.poll() is None:
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+        for _, process in processes:
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+        return
+
+    for _, process in processes:
+        if process.poll() is None:
+            process.terminate()
+    for _, process in processes:
+        if process.poll() is not None:
+            continue
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=3)
 
 
 def _fmt_usd(value: float | None) -> str:
@@ -1262,6 +1323,106 @@ def command_serve(args: argparse.Namespace) -> int:
     return serve_local_api(initialize_workspace(args.root), port=args.port)
 
 
+def command_health(args: argparse.Namespace) -> int:
+    api_ready, api_detail = _probe_http(f"http://127.0.0.1:{args.api_port}/api/health")
+    web_ready, web_detail = _probe_http(f"http://127.0.0.1:{args.web_port}/")
+    print(f"API: {api_detail}" if api_ready else f"API: unavailable ({api_detail})")
+    print(f"Web: {web_detail}" if web_ready else f"Web: unavailable ({web_detail})")
+    return 0 if api_ready and web_ready else 1
+
+
+def command_start(args: argparse.Namespace) -> int:
+    api_url = f"http://127.0.0.1:{args.api_port}"
+    web_url = f"http://127.0.0.1:{args.web_port}"
+    api_ready, _ = _probe_http(f"{api_url}/api/health")
+    web_ready, _ = _probe_http(f"{web_url}/")
+    if api_ready and web_ready:
+        print("Agent DevTools is already running.")
+        return 0
+
+    if not api_ready and _port_is_open(args.api_port):
+        raise SystemExit(f"API port {args.api_port} is occupied by another service")
+    if not web_ready and _port_is_open(args.web_port):
+        raise SystemExit(f"Web port {args.web_port} is occupied by another service")
+
+    root = Path(args.root).resolve()
+    npm = None
+    web_root = root / "packages" / "web-ui"
+    if not web_ready:
+        if not (web_root / "package.json").is_file():
+            raise SystemExit(f"Web UI package not found: {web_root / 'package.json'}")
+        npm = shutil.which("npm.cmd") or shutil.which("npm")
+        if npm is None:
+            raise SystemExit("npm is required to start the Agent DevTools Web UI")
+
+    processes: list[tuple[str, subprocess.Popen]] = []
+    try:
+        if not api_ready:
+            api_process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "serve",
+                    "--root",
+                    str(root),
+                    "--port",
+                    str(args.api_port),
+                ],
+                cwd=str(root),
+            )
+            processes.append(("API", api_process))
+
+        if not web_ready:
+            web_env = os.environ.copy()
+            web_env["AGENT_DEVTOOLS_API_URL"] = api_url
+            web_process = subprocess.Popen(
+                [
+                    npm,
+                    "--prefix",
+                    str(web_root),
+                    "run",
+                    "dev",
+                    "--",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(args.web_port),
+                ],
+                cwd=str(root),
+                env=web_env,
+            )
+            processes.append(("Web", web_process))
+
+        deadline = time.monotonic() + args.startup_timeout
+        while True:
+            api_ready, _ = _probe_http(f"{api_url}/api/health")
+            web_ready, _ = _probe_http(f"{web_url}/")
+            if api_ready and web_ready:
+                break
+            for name, process in processes:
+                return_code = process.poll()
+                if return_code is not None:
+                    raise SystemExit(f"{name} exited before startup (exit code {return_code})")
+            if time.monotonic() >= deadline:
+                raise SystemExit(
+                    f"Agent DevTools did not become ready within {args.startup_timeout:g} seconds"
+                )
+            time.sleep(0.2)
+
+        print(f"Agent DevTools API: {api_url}")
+        print(f"Agent DevTools Web: {web_url}")
+        print("Press Ctrl+C to stop services started by this command.")
+        while True:
+            for name, process in processes:
+                return_code = process.poll()
+                if return_code is not None:
+                    print(f"{name} stopped (exit code {return_code}).")
+                    return 0 if return_code == 0 else 1
+            time.sleep(0.5)
+    finally:
+        _stop_processes(processes)
+
+
 def command_team_serve(args: argparse.Namespace) -> int:
     database_url = args.database_url or os.getenv("AGENT_DEVTOOLS_DATABASE_URL", "")
     if not database_url:
@@ -1387,6 +1548,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--root", default=".", help="Workspace directory")
     p_serve.add_argument("--port", type=int, default=8791, help="Loopback API port")
     p_serve.set_defaults(func=command_serve)
+
+    p_start = subparsers.add_parser("start", help="Start the local API and Web UI together")
+    p_start.add_argument("--root", default=".", help="Workspace directory")
+    p_start.add_argument("--api-port", type=int, default=8791, help="Loopback API port")
+    p_start.add_argument("--web-port", type=int, default=5175, help="Loopback Web UI port")
+    p_start.add_argument("--startup-timeout", type=float, default=20.0, help="Seconds to wait for services")
+    p_start.set_defaults(func=command_start)
+
+    p_health = subparsers.add_parser("health", help="Check the local API and Web UI")
+    p_health.add_argument("--api-port", type=int, default=8791, help="Loopback API port")
+    p_health.add_argument("--web-port", type=int, default=5175, help="Loopback Web UI port")
+    p_health.set_defaults(func=command_health)
 
     p_team_serve = subparsers.add_parser("team-serve", help="Serve PostgreSQL project Trace API on loopback")
     p_team_serve.add_argument("--database-url", help="PostgreSQL URL; defaults to AGENT_DEVTOOLS_DATABASE_URL")
