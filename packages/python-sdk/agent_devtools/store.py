@@ -76,7 +76,7 @@ class TraceStore:
                     total.amount_usd,
                     str(source_path) if source_path else "",
                     json.dumps(trace.to_dict(), ensure_ascii=False, default=str, allow_nan=False),
-                    _utc_now(),
+                    _trace_activity_at(trace),
                 ),
             )
         return trace.run.id
@@ -99,7 +99,7 @@ class TraceStore:
                 SELECT run_id, task, status, started_at, duration_ms, step_count,
                        total_tokens, cost_usd, source_path
                 FROM traces
-                ORDER BY started_at DESC, run_id DESC
+                ORDER BY imported_at DESC, run_id DESC
                 LIMIT ?
                 """,
                 (limit,),
@@ -119,7 +119,7 @@ class TraceStore:
                    OR task LIKE ? ESCAPE '\\'
                    OR status LIKE ? ESCAPE '\\'
                    OR source_path LIKE ? ESCAPE '\\'
-                ORDER BY started_at DESC, run_id DESC
+                ORDER BY imported_at DESC, run_id DESC
                 LIMIT ?
                 """,
                 (pattern, pattern, pattern, pattern, limit),
@@ -157,11 +157,12 @@ class TraceStore:
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_traces_status ON traces(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_traces_task ON traces(task)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_traces_imported_at ON traces(imported_at)")
 
     def _to_storable_trace(self, trace: Trace) -> Trace:
         if self.redaction is None:
-            return trace
-        return redact_trace(trace, self.redaction)
+            return _with_visible_claude_task(trace)
+        return _with_visible_claude_task(redact_trace(trace, self.redaction))
 
     @contextmanager
     def _connect(self) -> Generator[sqlite3.Connection, None, None]:
@@ -223,7 +224,7 @@ class PostgresTraceStore:
                     total.amount_usd,
                     str(source_path) if source_path else "",
                     json.dumps(trace.to_dict(), ensure_ascii=False, default=str, allow_nan=False),
-                    _utc_now(),
+                    _trace_activity_at(trace),
                 ),
             )
         return trace.run.id
@@ -246,7 +247,7 @@ class PostgresTraceStore:
                 SELECT run_id, task, status, started_at, duration_ms, step_count,
                        total_tokens, cost_usd, source_path
                 FROM traces
-                ORDER BY started_at DESC, run_id DESC
+                ORDER BY imported_at DESC, run_id DESC
                 LIMIT %s
                 """,
                 (limit,),
@@ -266,7 +267,7 @@ class PostgresTraceStore:
                    OR task LIKE %s ESCAPE '\\'
                    OR status LIKE %s ESCAPE '\\'
                    OR source_path LIKE %s ESCAPE '\\'
-                ORDER BY started_at DESC, run_id DESC
+                ORDER BY imported_at DESC, run_id DESC
                 LIMIT %s
                 """,
                 (pattern, pattern, pattern, pattern, limit),
@@ -304,11 +305,12 @@ class PostgresTraceStore:
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_traces_status ON traces(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_traces_task ON traces(task)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_traces_imported_at ON traces(imported_at)")
 
     def _to_storable_trace(self, trace: Trace) -> Trace:
         if self.redaction is None:
-            return trace
-        return redact_trace(trace, self.redaction)
+            return _with_visible_claude_task(trace)
+        return _with_visible_claude_task(redact_trace(trace, self.redaction))
 
     @contextmanager
     def _connect(self) -> Generator[Any, None, None]:
@@ -343,6 +345,24 @@ def _summary(row: sqlite3.Row) -> StoredTraceSummary:
         cost_usd=row["cost_usd"],
         source_path=row["source_path"],
     )
+
+
+def _with_visible_claude_task(trace: Trace) -> Trace:
+    if trace.run.labels.get("source") != "claude-code-http-hooks":
+        return trace
+    for step in reversed(trace.steps):
+        if step.name == "User prompt" and isinstance(step.input, str) and step.input.strip():
+            trace.run.task = step.input[:20000]
+            break
+    return trace
+
+
+def _trace_activity_at(trace: Trace) -> str:
+    candidates = [trace.run.ended_at, trace.run.started_at]
+    for step in trace.steps:
+        candidates.extend([step.ended_at, step.started_at])
+    timestamps = [value for value in candidates if isinstance(value, str) and value]
+    return max(timestamps) if timestamps else _utc_now()
 
 
 def _trace_from_json_value(value: Any) -> Trace:

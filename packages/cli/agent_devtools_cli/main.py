@@ -11,6 +11,7 @@ Usage::
     py packages/cli/agent_devtools_cli/main.py experiment traces/a.trace.json traces/b.trace.json
     py packages/cli/agent_devtools_cli/main.py replay traces/run.trace.json --start-step <step-id>
     py packages/cli/agent_devtools_cli/main.py replay-adapter traces/run.trace.json --start-step <step-id> --callable path/to/agent.py:run --allow-unsafe-code
+    py packages/cli/agent_devtools_cli/main.py replay-claude-code traces/run.trace.json --start-step <step-id> --allow-agent-execution
     py packages/cli/agent_devtools_cli/main.py replay-compare traces/source.trace.json traces/replay.trace.json
     py packages/cli/agent_devtools_cli/main.py regression-check traces/baseline.trace.json traces/candidate.trace.json --max-token-delta 100
     py packages/cli/agent_devtools_cli/main.py redact traces/run.trace.json --output traces/run.safe.trace.json
@@ -30,17 +31,25 @@ import importlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 # Ensure sibling python-sdk is importable
 _sdk = Path(__file__).resolve().parents[2] / "python-sdk"
-if importlib.util.find_spec("agent_devtools") is None and str(_sdk) not in sys.path:
-    sys.path.append(str(_sdk))
+if _sdk.is_dir():
+    _sdk_path = str(_sdk)
+    if _sdk_path in sys.path:
+        sys.path.remove(_sdk_path)
+    sys.path.insert(0, _sdk_path)
 
 from agent_devtools import (
     CallableAgentAdapter,
@@ -418,7 +427,7 @@ def command_analyze(args: argparse.Namespace) -> int:
 
 
 def command_replay(args: argparse.Namespace) -> int:
-    source = _load(args.trace)
+    source = _load_replay_source(args)
     plan = _load_replay_plan(getattr(args, "plan", None), source)
     start_step_id = args.start_step or plan.get("start_step_id")
     if not start_step_id:
@@ -494,6 +503,210 @@ def command_replay_adapter(args: argparse.Namespace) -> int:
         print(f"Error:      {error.get('type', '')}: {error.get('message', '')}")
         return 1
     return 0
+
+
+def command_replay_claude_code(args: argparse.Namespace) -> int:
+    if not args.allow_agent_execution:
+        raise SystemExit("replay-claude-code executes Claude Code in a trusted workspace. Re-run with --allow-agent-execution only when you trust the trace prompt and workspace.")
+
+    source = _load_claude_replay_source(args)
+    if source.run.labels.get("source") != "claude-code-http-hooks":
+        raise SystemExit("replay-claude-code requires a Trace captured by Claude Code HTTP hooks")
+    try:
+        start_step = source.steps[_find_start_index(source, args.start_step)]
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if start_step.name != "User prompt":
+        raise SystemExit("Claude Code replay requires a replayable User prompt step")
+    prompt = start_step.input
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise SystemExit("Claude Code replay requires a recorded text prompt at --start-step")
+    claude_executable = shutil.which(args.claude_executable)
+    if claude_executable is None:
+        raise SystemExit(f"Claude Code executable not found: {args.claude_executable}")
+
+    session_id = str(uuid.uuid4())
+    api_url = _loopback_api_url(args.api_url)
+    _register_claude_code_replay(api_url, session_id, source, start_step.id)
+    command = [
+        claude_executable,
+        "--print",
+        "--output-format",
+        "json",
+        "--session-id",
+        session_id,
+        "--permission-mode",
+        args.permission_mode,
+        "--max-budget-usd",
+        str(args.max_budget_usd),
+        "--name",
+        "Agent DevTools Replay",
+    ]
+    if args.allowed_tool:
+        command.extend(["--allowedTools", ",".join(args.allowed_tool)])
+    if args.model:
+        command.extend(["--model", args.model])
+    command.extend(["--", prompt])
+
+    try:
+        proc = subprocess.run(
+            command,
+            cwd=Path(args.root).resolve(),
+            text=True,
+            capture_output=True,
+            timeout=args.timeout,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise SystemExit(f"Claude Code executable not found: {args.claude_executable}") from exc
+    except subprocess.TimeoutExpired as exc:
+        _finalize_claude_code_replay(
+            api_url,
+            {
+                "session_id": session_id,
+                "status": "timeout",
+                "result_subtype": "timeout",
+                "partial": True,
+            },
+        )
+        raise SystemExit(f"Claude Code replay timed out after {args.timeout:g} seconds") from exc
+    result = _parse_claude_code_result(proc.stdout) or _parse_claude_code_result(proc.stderr) or {}
+    replay_status = _claude_code_replay_status(proc.returncode, result)
+    _finalize_claude_code_replay(api_url, _claude_code_finalize_payload(session_id, replay_status, result))
+    if replay_status != "success":
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
+        raise SystemExit(f"Claude Code replay failed: {_truncate(detail, 500)}")
+
+    print("Claude Code replay completed")
+    print(f"Source run: {source.run.id}")
+    print(f"Replay session: {session_id}")
+    return 0
+
+
+def _parse_claude_code_result(text: str) -> dict[str, Any] | None:
+    candidate = text.strip()
+    if not candidate:
+        return None
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _claude_code_replay_status(returncode: int, result: dict[str, Any]) -> str:
+    subtype = str(result.get("subtype", ""))
+    if subtype == "error_max_budget_usd" or result.get("is_error") is True:
+        return "error"
+    if returncode == 0:
+        return "success"
+    return "error"
+
+
+def _claude_code_finalize_payload(session_id: str, status: str, result: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "session_id": session_id,
+        "status": status,
+        "partial": status != "success",
+    }
+    for source_key, target_key in {
+        "subtype": "result_subtype",
+        "stop_reason": "stop_reason",
+        "session_id": "claude_session_id",
+        "total_cost_usd": "total_cost_usd",
+        "usage": "usage",
+    }.items():
+        if source_key in result:
+            payload[target_key] = result[source_key]
+    if status == "success" and "result" in result:
+        payload["result"] = result["result"]
+    return payload
+
+
+def _finalize_claude_code_replay(api_url: str, payload: dict[str, Any]) -> None:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = Request(
+        f"{api_url.rstrip('/')}/api/replay/claude-code/finalize",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=3) as response:
+            if response.status != 202:
+                raise SystemExit(f"Claude Code replay finalization failed with HTTP {response.status}")
+    except HTTPError as exc:
+        raise SystemExit(f"Claude Code replay finalization failed with HTTP {exc.code}") from exc
+    except URLError as exc:
+        raise SystemExit(f"Unable to finalize Claude Code replay through the Agent DevTools API at {api_url}") from exc
+
+
+def _register_claude_code_replay(api_url: str, session_id: str, source: Trace, start_step_id: str) -> None:
+    body = json.dumps(
+        {
+            "session_id": session_id,
+            "source_run_id": source.run.id,
+            "source_start_step_id": start_step_id,
+            "source_run_status": source.run.status,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = Request(
+        f"{api_url.rstrip('/')}/api/replay/claude-code/register",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=3) as response:
+            if response.status != 202:
+                raise SystemExit(f"Claude Code replay registration failed with HTTP {response.status}")
+    except HTTPError as exc:
+        raise SystemExit(f"Claude Code replay registration failed with HTTP {exc.code}") from exc
+    except URLError as exc:
+        raise SystemExit(f"Unable to reach the Agent DevTools API at {api_url}") from exc
+
+
+def _load_claude_replay_source(args: argparse.Namespace) -> Trace:
+    return _load_path_or_local_run(args.trace, getattr(args, "run_id", None), getattr(args, "root", "."), "replay-claude-code")
+
+
+def _load_replay_source(args: argparse.Namespace) -> Trace:
+    return _load_path_or_local_run(args.trace, getattr(args, "run_id", None), getattr(args, "root", "."), "replay")
+
+
+def _load_path_or_local_run(trace_path: str | None, run_id: str | None, root: str, command_name: str) -> Trace:
+    if trace_path and run_id:
+        raise SystemExit(f"{command_name} accepts either TRACE or --run-id, not both")
+    if trace_path:
+        return _load(trace_path)
+    if not run_id:
+        raise SystemExit(f"{command_name} requires TRACE or --run-id")
+    workspace = initialize_workspace(root)
+    trace = TraceStore(workspace.db_path, redaction=True).get_trace(run_id)
+    if trace is None:
+        raise SystemExit(f"Local Trace not found for run id: {run_id}")
+    return trace
+
+
+def _loopback_api_url(value: str) -> str:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise SystemExit("Claude Code replay API must be a valid loopback HTTP URL") from exc
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or port is None
+    ):
+        raise SystemExit("Claude Code replay API must be a loopback HTTP URL with an explicit port")
+    return value.rstrip("/")
 
 
 def _callable_label(spec: str) -> str:
@@ -1172,7 +1385,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_serve = subparsers.add_parser("serve", help="Serve locally indexed traces to the Web UI over loopback HTTP")
     p_serve.add_argument("--root", default=".", help="Workspace directory")
-    p_serve.add_argument("--port", type=int, default=8765, help="Loopback API port")
+    p_serve.add_argument("--port", type=int, default=8791, help="Loopback API port")
     p_serve.set_defaults(func=command_serve)
 
     p_team_serve = subparsers.add_parser("team-serve", help="Serve PostgreSQL project Trace API on loopback")
@@ -1266,7 +1479,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # replay
     p_replay = subparsers.add_parser("replay", help="Create a deterministic replay trace from a recorded run")
-    p_replay.add_argument("trace")
+    p_replay.add_argument("trace", nargs="?")
+    p_replay.add_argument("--run-id", help="Load a local Trace from --root by run id")
+    p_replay.add_argument("--root", default=".", help="Local Agent DevTools workspace directory")
     p_replay.add_argument("--start-step", help="Step id to start replay from")
     p_replay.add_argument("--plan", help="Replay Plan JSON with start_step_id and mocked_tools")
     p_replay.add_argument("--output-dir", default="traces", help="Directory for the replay trace")
@@ -1283,6 +1498,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_replay_adapter.add_argument("--allow-unsafe-code", action="store_true", help="Allow execution of local Python code from --callable")
     p_replay_adapter.add_argument("--output-dir", default="traces", help="Directory for the adapter replay trace")
     p_replay_adapter.set_defaults(func=command_replay_adapter)
+
+    # replay-claude-code
+    p_replay_claude = subparsers.add_parser("replay-claude-code", help="Execute a Claude Code replay from a recorded prompt")
+    p_replay_claude.add_argument("trace", nargs="?")
+    p_replay_claude.add_argument("--run-id", help="Load a local Trace from --root by run id")
+    p_replay_claude.add_argument("--start-step", required=True, help="Replayable User prompt step id")
+    p_replay_claude.add_argument("--root", default=".", help="Trusted workspace directory used as the Claude Code cwd")
+    p_replay_claude.add_argument("--api-url", default="http://127.0.0.1:8791", help="Loopback Agent DevTools API URL")
+    p_replay_claude.add_argument("--permission-mode", choices=["plan", "dontAsk", "acceptEdits"], default="plan")
+    p_replay_claude.add_argument("--allowed-tool", action="append", default=[], help="Claude Code tool allowlist entry; may be repeated")
+    p_replay_claude.add_argument("--max-budget-usd", type=float, default=1.0, help="Maximum Claude API spend for this replay")
+    p_replay_claude.add_argument("--model", help="Optional Claude model override")
+    p_replay_claude.add_argument("--claude-executable", default="claude", help="Claude Code executable")
+    p_replay_claude.add_argument("--timeout", type=float, default=600.0, help="Maximum replay runtime in seconds")
+    p_replay_claude.add_argument("--allow-agent-execution", action="store_true", help="Allow Claude Code to execute in the trusted workspace")
+    p_replay_claude.set_defaults(func=command_replay_claude_code)
 
     # replay-compare
     p_replay_compare = subparsers.add_parser("replay-compare", help="Compare an original trace path against a replay trace")

@@ -1,4 +1,5 @@
 import {
+  buildClaudeCodeReplayCliCommand,
   buildReplayCliCommand,
   buildReplayPlanDownload,
   buildReplayPlan,
@@ -6,6 +7,7 @@ import {
   compareReplay,
   compareExperiment,
   computeCostSummary,
+  describeClaudeCodeReplayOutcome,
   diffRuns,
   filterSteps,
   listReplayCheckpoints,
@@ -257,6 +259,17 @@ test('listReplayCheckpoints returns only replayable steps in order', () => {
   assertEqual(checkpoints[1].id, 'step-model-a', 'second checkpoint');
 });
 
+test('listReplayCheckpoints recognizes legacy Claude Code user prompts', () => {
+  const trace = cloneTrace(baseTrace);
+  trace.run.labels.source = 'claude-code-http-hooks';
+  trace.steps.forEach((step) => { step.replayable = false; });
+  trace.steps[0].name = 'User prompt';
+
+  const checkpoints = listReplayCheckpoints(trace);
+  assertEqual(checkpoints.length, 1, 'legacy Claude checkpoint count');
+  assertEqual(checkpoints[0].id, 'step-plan-a', 'legacy Claude checkpoint');
+});
+
 test('buildReplayPlan captures downstream steps and tool mocks from selected checkpoint', () => {
   const plan = buildReplayPlan(baseTrace, 'step-plan-a');
 
@@ -288,6 +301,16 @@ test('buildReplayCliCommand uses editable placeholder for imported traces', () =
   );
 });
 
+test('buildReplayCliCommand uses the local run id', () => {
+  const command = buildReplayCliCommand('local:run-a', 'step-plan-a', 'run-a');
+
+  assertEqual(
+    command,
+    "py packages/cli/agent_devtools_cli/main.py replay --run-id 'run-a' --start-step 'step-plan-a' --root . --output-dir traces",
+    'local replay command',
+  );
+});
+
 test('buildReplayCliCommand can use a replay plan file', () => {
   const command = buildReplayCliCommand('/traces/sample-success.trace.json', 'step-plan-a', 'run-a', 'replay-plan.json');
 
@@ -295,6 +318,39 @@ test('buildReplayCliCommand can use a replay plan file', () => {
     command,
     "py packages/cli/agent_devtools_cli/main.py replay 'packages/web-ui/public/traces/sample-success.trace.json' --plan 'replay-plan.json' --output-dir traces",
     'plan replay command',
+  );
+});
+
+test('buildClaudeCodeReplayCliCommand uses the local run id', () => {
+  const command = buildClaudeCodeReplayCliCommand('local:run-a', 'step-plan-a', 'run-a');
+
+  assertEqual(
+    command,
+    "py packages/cli/agent_devtools_cli/main.py replay-claude-code --run-id 'run-a' --start-step 'step-plan-a' --root . --allow-agent-execution",
+    'Claude Code runtime replay command',
+  );
+});
+
+test('describeClaudeCodeReplayOutcome explains partial budget-limited Claude replay', () => {
+  const trace = cloneTrace(baseTrace);
+  trace.run.status = 'error';
+  trace.run.final_output = null;
+  trace.run.labels = {
+    replay_mode: 'claude_code_execution',
+    partial: 'true',
+    claude_result_subtype: 'error_max_budget_usd',
+  };
+  trace.run.cost = {
+    input_tokens: 28785,
+    output_tokens: 213,
+    total_tokens: 28998,
+    amount_usd: 0.397472,
+  };
+
+  assertEqual(
+    describeClaudeCodeReplayOutcome(trace),
+    '真实 Claude Code 回放已部分捕获，但因预算上限停止。已保留现有步骤和 $0.3975 成本记录，缺少最终输出。',
+    'partial budget outcome',
   );
 });
 

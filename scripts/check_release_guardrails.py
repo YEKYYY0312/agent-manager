@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -131,7 +132,9 @@ def _package_name(specifier: str) -> str:
 
 
 def _iter_files(root: Path) -> Iterable[Path]:
-    for path in root.rglob("*"):
+    git_candidates = _git_candidate_files(root)
+    candidates = git_candidates if git_candidates is not None else root.rglob("*")
+    for path in candidates:
         if not path.is_file():
             continue
         relative = path.relative_to(root)
@@ -141,6 +144,22 @@ def _iter_files(root: Path) -> Iterable[Path]:
         if any(part in EXCLUDED_DIRS or part in EXCLUDED_PARTS for part in relative_parts):
             continue
         yield path
+
+
+def _git_candidate_files(root: Path) -> list[Path] | None:
+    if not (root / ".git").exists():
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return [root / path.decode("utf-8", errors="surrogateescape") for path in result.stdout.split(b"\0") if path]
 
 
 def _is_text_file(path: Path) -> bool:

@@ -11,6 +11,8 @@ from .store import TraceStore
 from .trace import Error, Step, Trace, new_run
 from .writer import TraceWriter
 
+IMPORT_FINGERPRINT_VERSION = "v3"
+
 
 @dataclass(frozen=True)
 class LocalWorkspace:
@@ -58,8 +60,7 @@ def import_new_traces(config: LocalWorkspace, store: TraceStore | None = None) -
     fingerprints = _read_state(config.state_path)
     imported: list[str] = []
     for path in sorted(config.trace_dir.glob("*.trace.json")):
-        stat = path.stat()
-        fingerprint = f"{stat.st_mtime_ns}:{stat.st_size}"
+        fingerprint = _trace_fingerprint(path)
         if fingerprints.get(path.name) == fingerprint:
             continue
         try:
@@ -73,6 +74,14 @@ def import_new_traces(config: LocalWorkspace, store: TraceStore | None = None) -
         imported.append(trace.run.id)
     _write_state(config.state_path, fingerprints)
     return imported
+
+
+def mark_trace_imported(config: LocalWorkspace, path: str | Path) -> None:
+    """Record a live-written Trace so file discovery does not import it again."""
+    trace_path = Path(path)
+    fingerprints = _read_state(config.state_path)
+    fingerprints[trace_path.name] = _trace_fingerprint(trace_path)
+    _write_state(config.state_path, fingerprints)
 
 
 def record_external_audit(config: LocalWorkspace, *, task: str, events: list[dict[str, Any]]) -> Trace:
@@ -98,6 +107,11 @@ def _read_state(path: Path) -> dict[str, str]:
 
 def _write_state(path: Path, fingerprints: dict[str, str]) -> None:
     path.write_text(json.dumps(fingerprints, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _trace_fingerprint(path: Path) -> str:
+    stat = path.stat()
+    return f"{IMPORT_FINGERPRINT_VERSION}:{stat.st_mtime_ns}:{stat.st_size}"
 
 
 def _write_example_trace(trace_dir: Path) -> None:

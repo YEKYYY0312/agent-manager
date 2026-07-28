@@ -18,6 +18,7 @@ Agent DevTools is not a hosted observability platform. The useful wedge is small
 - Optional `LangGraphAdapter` for executing compiled LangGraph graphs through `graph.invoke(...)` or node-level `graph.stream(...)` without adding LangGraph as a core dependency.
 - Optional `OpenAIAdapter` for tracing Responses API and Chat Completions calls with token usage mapped into step cost, plus opt-in Responses output item expansion.
 - Optional `AnthropicAdapter` for tracing Claude Messages API calls with token usage mapped into step cost, opt-in content block expansion, and local tool-use loop execution.
+- Live local ingestion for Claude Code, Codex, and Cursor Agent visible events, streamed to the Web UI over SSE without manual Trace upload.
 - Adapter replay API for re-running a selected trace step through a real adapter.
 - Web UI workbench with Trace Picker, Timeline search/filter, Step Inspector, Analysis, Run Diff, Replay Workbench, Replay Compare, Experiment comparison, Chinese UI text, IndexedDB-backed local imported trace persistence, and browser-side import history.
 
@@ -274,6 +275,11 @@ npm run build
 ## Documentation
 
 - [中文快速使用指南](docs/quick-start.zh.md)
+- [本地使用教程](docs/local-usage.zh.md)
+- [搭建全流程说明](docs/build-guide.zh.md)
+- [Claude Code HTTP Hooks 实时接入](docs/claude-code-live-hooks.zh.md)
+- [Codex 实时 Trace 接入](docs/codex-live-sessions.zh.md)
+- [Cursor Agent Hooks 实时接入](docs/cursor-live-hooks.zh.md)
 - [User Guide](docs/user-guide.md)
 - [Developer Guide](docs/developer-guide.md)
 - [Test Plan](docs/test-plan.md)

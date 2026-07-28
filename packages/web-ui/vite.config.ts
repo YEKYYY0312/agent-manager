@@ -19,7 +19,7 @@ export default defineConfig(({ command }) => ({
   server: {
     proxy: {
       '/api': {
-        target: process.env.AGENT_DEVTOOLS_API_URL ?? 'http://127.0.0.1:8765',
+        target: process.env.AGENT_DEVTOOLS_API_URL ?? 'http://127.0.0.1:8791',
         changeOrigin: true,
       },
     },

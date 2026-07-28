@@ -18,14 +18,32 @@ interface LocalTraceListResponse {
   traces: LocalTraceSummary[];
 }
 
-export function localTraceOptions(summaries: LocalTraceSummary[]): TraceOption[] {
-  return summaries.map((summary) => ({
-    path: `local:${summary.run_id}`,
-    label: summary.task || summary.run_id,
-  }));
+export interface LocalTraceOption extends TraceOption {
+  status: string;
 }
 
-export async function loadLocalTraceCatalog(fetcher: typeof fetch = fetch): Promise<TraceOption[]> {
+interface LiveTraceStream {
+  addEventListener(type: string, listener: (event: { data?: string }) => void): void;
+  close(): void;
+}
+
+type LiveTraceStreamFactory = (url: string) => LiveTraceStream;
+
+export function localTraceOptions(summaries: LocalTraceSummary[]): LocalTraceOption[] {
+  return focusLocalTraceOptions(summaries.map((summary) => ({
+    path: `local:${summary.run_id}`,
+    label: summary.task || summary.run_id,
+    status: summary.status,
+  })));
+}
+
+export function focusLocalTraceOptions(options: LocalTraceOption[]): LocalTraceOption[] {
+  const failures = options.filter((option) => option.status !== 'success');
+  const latestSuccess = options.find((option) => option.status === 'success');
+  return latestSuccess ? [...failures, latestSuccess] : failures;
+}
+
+export async function loadLocalTraceCatalog(fetcher: typeof fetch = fetch): Promise<LocalTraceOption[]> {
   const response = await fetcher('/api/traces', { cache: 'no-store' });
   if (!response.ok) throw new Error(`Local Trace API returned ${response.status}`);
   const payload = await response.json() as LocalTraceListResponse;
@@ -45,6 +63,24 @@ export function isLocalTracePath(path: string): boolean {
   return Boolean(localRunId(path));
 }
 
+export function subscribeToLiveTraces(
+  onTrace: (trace: Trace) => void,
+  onError: (error: Error) => void = () => {},
+  createStream: LiveTraceStreamFactory = defaultLiveTraceStream,
+): () => void {
+  const stream = createStream('/api/live/traces');
+  stream.addEventListener('message', (event) => {
+    try {
+      if (typeof event.data !== 'string') throw new Error('Live Trace event is missing data');
+      const payload = JSON.parse(event.data) as { trace?: unknown };
+      onTrace(normalizeTrace(payload.trace));
+    } catch (error) {
+      onError(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+  return () => stream.close();
+}
+
 function localRunId(path: string): string | null {
   if (!path.startsWith('local:')) return null;
   const runId = path.slice('local:'.length);
@@ -57,4 +93,8 @@ function isLocalTraceSummary(value: unknown): value is LocalTraceSummary {
   return typeof summary.run_id === 'string'
     && typeof summary.task === 'string'
     && typeof summary.status === 'string';
+}
+
+function defaultLiveTraceStream(url: string): LiveTraceStream {
+  return new EventSource(url) as unknown as LiveTraceStream;
 }

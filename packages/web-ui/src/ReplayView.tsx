@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReplayToolMock, Trace } from './types';
-import { buildReplayCliCommand, buildReplayPlan, buildReplayPlanDownload, fmtMs, listReplayCheckpoints, stepIcon } from './trace';
+import { buildClaudeCodeReplayCliCommand, buildReplayCliCommand, buildReplayPlan, buildReplayPlanDownload, describeClaudeCodeReplayOutcome, fmtMs, listReplayCheckpoints, stepIcon } from './trace';
 import { EmptyState } from './components/EmptyState';
 import { MetricCard } from './components/MetricCard';
 import { StatusBadge } from './components/StatusBadge';
@@ -46,6 +46,12 @@ export function ReplayView({ trace, tracePath }: Props) {
   const replayCommand = useMemo(
     () => buildReplayCliCommand(tracePath, selectedStepId, trace.run.id, replayPlanPath),
     [tracePath, selectedStepId, trace.run.id, replayPlanPath],
+  );
+  const isClaudeCodeTrace = trace.run.labels.source === 'claude-code-http-hooks';
+  const claudeReplayOutcome = useMemo(() => describeClaudeCodeReplayOutcome(trace), [trace]);
+  const claudeCodeReplayCommand = useMemo(
+    () => buildClaudeCodeReplayCliCommand(tracePath, selectedStepId, trace.run.id),
+    [tracePath, selectedStepId, trace.run.id],
   );
 
   const copyPlan = async () => {
@@ -95,6 +101,15 @@ export function ReplayView({ trace, tracePath }: Props) {
     }
   };
 
+  const copyClaudeCodeCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(claudeCodeReplayCommand);
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+    }
+  };
+
   if (checkpoints.length === 0) {
     return (
       <div className="panel-full">
@@ -111,9 +126,10 @@ export function ReplayView({ trace, tracePath }: Props) {
       <div className="replay-header">
         <div>
           <h2 className="panel-heading">回放工作台 Replay</h2>
-          <p className="muted replay-subtitle">选择一个可回放步骤，生成从该步骤开始的回放计划。当前版本只生成计划，不重新执行 Agent。</p>
+          <p className="muted replay-subtitle">选择一个可回放步骤，生成确定性回放计划或受控的 Claude Code 实际重跑命令。</p>
         </div>
         <div className="replay-actions">
+          {isClaudeCodeTrace && <button type="button" className="btn btn-secondary" onClick={copyClaudeCodeCommand}>复制真实重跑命令</button>}
           <button type="button" className="btn btn-secondary" onClick={copyCommand} disabled={mockState.hasInvalidMocks}>复制命令</button>
           <button type="button" className="btn btn-secondary" onClick={downloadPlan} disabled={mockState.hasInvalidMocks}>下载计划</button>
           <button type="button" className="btn" onClick={copyPlan} disabled={mockState.hasInvalidMocks}>复制计划</button>
@@ -124,6 +140,7 @@ export function ReplayView({ trace, tracePath }: Props) {
       {copyState === 'downloaded' && <p className="replay-copy-state">已下载 replay-plan.json。</p>}
       {copyState === 'failed' && <p className="replay-copy-state replay-copy-error">浏览器阻止复制，请手动复制下方内容。</p>}
       {copyState === 'invalid' && <p className="replay-copy-state replay-copy-error">Mock result JSON 无效，请先修正。</p>}
+      {claudeReplayOutcome && <p className="replay-outcome replay-outcome-warning">{claudeReplayOutcome}</p>}
 
       <div className="metrics-row">
         <MetricCard label="可回放点" value={checkpoints.length} kind="accent" />
@@ -213,8 +230,14 @@ export function ReplayView({ trace, tracePath }: Props) {
         </section>
 
         <section className="replay-section">
-          <h3>Replay CLI 命令</h3>
+          <h3>确定性 Replay CLI 命令</h3>
           <pre className="replay-command">{replayCommand}</pre>
+          {isClaudeCodeTrace && (
+            <>
+              <h3>Claude Code 真实重跑命令</h3>
+              <pre className="replay-command">{claudeCodeReplayCommand}</pre>
+            </>
+          )}
           {tracePath.startsWith('import:') && (
             <p className="muted replay-note">浏览器不能读取本地绝对路径，请把占位路径替换成真实 trace 文件路径。</p>
           )}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from scripts.check_release_guardrails import check_repo
@@ -48,3 +49,14 @@ def test_release_guardrails_detect_undeclared_web_imports(tmp_path: Path) -> Non
 
     assert any(issue.code == "undeclared-web-import" and "lodash" in issue.message for issue in issues)
     assert all("react" not in issue.message for issue in issues)
+
+
+def test_release_guardrails_ignore_gitignored_runtime_traces(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    _write(tmp_path / ".gitignore", "traces/*.trace.json\n")
+    _write(tmp_path / "traces/live.trace.json", "C:\\Users\\alice\\project\\README.md\n")
+    _write(tmp_path / "packages/web-ui/package.json", json.dumps({"dependencies": {}, "devDependencies": {}}))
+
+    issues = check_repo(tmp_path)
+
+    assert not any(issue.path == "traces/live.trace.json" for issue in issues)

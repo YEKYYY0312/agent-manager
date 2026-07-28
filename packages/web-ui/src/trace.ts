@@ -192,7 +192,8 @@ export function compareExperiment(left: Trace, right: Trace): ExperimentReport {
 }
 
 export function listReplayCheckpoints(trace: Trace): Step[] {
-  return trace.steps.filter((step) => step.replayable);
+  const isClaudeCodeTrace = trace.run.labels.source === 'claude-code-http-hooks';
+  return trace.steps.filter((step) => step.replayable || (isClaudeCodeTrace && step.name === 'User prompt'));
 }
 
 export function buildReplayPlan(trace: Trace, startStepId: string): ReplayPlan {
@@ -209,11 +210,35 @@ export function buildReplayPlan(trace: Trace, startStepId: string): ReplayPlan {
 }
 
 export function buildReplayCliCommand(tracePath: string, startStepId: string, runId: string, planPath?: string): string {
-  const cliTracePath = tracePathForCli(tracePath, runId);
+  const localSource = tracePath.startsWith('local:');
+  const source = localSource
+    ? `--run-id ${shellQuote(runId)}`
+    : shellQuote(tracePathForCli(tracePath, runId));
+  const root = localSource ? ' --root .' : '';
   if (planPath) {
-    return `py packages/cli/agent_devtools_cli/main.py replay ${shellQuote(cliTracePath)} --plan ${shellQuote(planPath)} --output-dir traces`;
+    return `py packages/cli/agent_devtools_cli/main.py replay ${source} --plan ${shellQuote(planPath)}${root} --output-dir traces`;
   }
-  return `py packages/cli/agent_devtools_cli/main.py replay ${shellQuote(cliTracePath)} --start-step ${shellQuote(startStepId)} --output-dir traces`;
+  return `py packages/cli/agent_devtools_cli/main.py replay ${source} --start-step ${shellQuote(startStepId)}${root} --output-dir traces`;
+}
+
+export function buildClaudeCodeReplayCliCommand(tracePath: string, startStepId: string, runId: string): string {
+  const command = 'py packages/cli/agent_devtools_cli/main.py replay-claude-code';
+  const source = tracePath.startsWith('local:')
+    ? `--run-id ${shellQuote(runId)}`
+    : shellQuote(tracePathForCli(tracePath, runId));
+  return `${command} ${source} --start-step ${shellQuote(startStepId)} --root . --allow-agent-execution`;
+}
+
+export function describeClaudeCodeReplayOutcome(trace: Trace): string | null {
+  if (trace.run.labels.replay_mode !== 'claude_code_execution' || trace.run.labels.partial !== 'true') {
+    return null;
+  }
+  const missingFinalOutput = trace.run.final_output === null || trace.run.final_output === undefined;
+  const cost = trace.run.cost?.amount_usd ?? 0;
+  if (trace.run.labels.claude_result_subtype === 'error_max_budget_usd') {
+    return `真实 Claude Code 回放已部分捕获，但因预算上限停止。已保留现有步骤和 $${cost.toFixed(4)} 成本记录${missingFinalOutput ? '，缺少最终输出' : ''}。`;
+  }
+  return `真实 Claude Code 回放已部分捕获。已保留现有步骤和 $${cost.toFixed(4)} 成本记录${missingFinalOutput ? '，缺少最终输出' : ''}。`;
 }
 
 export function buildPortableReplayPlan(plan: ReplayPlan, mockedTools: ReplayToolMock[] = plan.mockedTools) {

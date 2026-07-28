@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Trace } from './types';
 import { computeCostSummary, loadTrace, loadTraceFromFile } from './trace';
-import { isLocalTracePath, loadLocalTrace, loadLocalTraceCatalog } from './local';
+import {
+  focusLocalTraceOptions,
+  isLocalTracePath,
+  loadLocalTrace,
+  loadLocalTraceCatalog,
+  subscribeToLiveTraces,
+  type LocalTraceOption,
+} from './local';
 import { Timeline } from './Timeline';
 import { StepInspector } from './StepInspector';
 import { SummaryBar } from './SummaryBar';
@@ -46,7 +53,7 @@ function App() {
   const [view, setView] = useState<WorkspaceTab>(DEFAULT_TAB);
   const [importedTraces, setImportedTraces] = useState<TraceOption[]>(persistedImports.options);
   const [importedTraceMap, setImportedTraceMap] = useState<Record<string, Trace>>(persistedImports.traceMap);
-  const [localTraces, setLocalTraces] = useState<TraceOption[]>([]);
+  const [localTraces, setLocalTraces] = useState<LocalTraceOption[]>([]);
   const [dropActive, setDropActive] = useState(false);
 
   useEffect(() => {
@@ -162,6 +169,28 @@ function App() {
     return () => { cancelled = true; };
   }, [defaultPath]);
 
+  useEffect(() => subscribeToLiveTraces(
+    (liveTrace) => {
+      const path = `local:${liveTrace.run.id}`;
+      const option: LocalTraceOption = {
+        path,
+        label: liveTrace.run.task || liveTrace.run.id,
+        status: liveTrace.run.status,
+      };
+      setLocalTraces((previous) => focusLocalTraceOptions([
+        option,
+        ...previous.filter((item) => item.path !== path),
+      ]));
+      setTrace(liveTrace);
+      setTracePath(path);
+      setSelectedStepId((current) => (
+        current && liveTrace.steps.some((step) => step.id === current) ? current : null
+      ));
+      setError(null);
+    },
+    (liveError) => setError(`Live Trace error: ${liveError.message}`),
+  ), []);
+
   const selected = trace?.steps.find(s => s.id === selectedStepId) ?? null;
   const costSummary = trace ? computeCostSummary(trace) : null;
 
@@ -169,6 +198,9 @@ function App() {
     <div className="app">
       <header className="app-header">
         <h1>Agent DevTools</h1>
+        {trace?.run.labels.source === 'claude-code-http-hooks' && !trace.run.ended_at && (
+          <span className="live-indicator">LIVE</span>
+        )}
         <span className="subtitle">Agent 运行可观测性工作台 — 录制、查看、对比 AI Agent 执行 Trace</span>
       </header>
 

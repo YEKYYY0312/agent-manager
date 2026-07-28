@@ -44,6 +44,53 @@ def test_trace_store_upserts_and_lists_trace_summaries() -> None:
     assert rows[0].source_path == "traces/run.trace.json"
 
 
+def test_trace_store_lists_recently_active_trace_first() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        store = TraceStore(Path(tmp) / "traces.db")
+        older_session = _trace("Original Claude prompt")
+        older_session.run.labels["source"] = "claude-code-http-hooks"
+        older_session.run.started_at = "2026-07-26T00:00:00Z"
+        older_session.run.ended_at = "2026-07-26T00:00:01Z"
+        older_session.steps[0].started_at = "2026-07-26T00:00:00Z"
+        older_session.steps[0].ended_at = "2026-07-26T00:00:01Z"
+        followup = Step(type="custom", name="User prompt", input="Latest Claude prompt in old session")
+        followup.started_at = "2026-07-28T00:00:00Z"
+        followup.complete()
+        followup.ended_at = "2026-07-28T00:00:01Z"
+        older_session.add_step(followup)
+        newer_session = _trace("Newer started run")
+        newer_session.run.started_at = "2026-07-27T00:00:00Z"
+        newer_session.run.ended_at = "2026-07-27T00:00:01Z"
+        newer_session.steps[0].started_at = "2026-07-27T00:00:00Z"
+        newer_session.steps[0].ended_at = "2026-07-27T00:00:01Z"
+
+        store.upsert_trace(older_session)
+        store.upsert_trace(newer_session)
+
+        rows = store.list_traces()
+
+    assert [row.task for row in rows[:2]] == ["Latest Claude prompt in old session", "Newer started run"]
+
+
+def test_trace_store_promotes_latest_claude_prompt_for_imported_traces() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        store = TraceStore(Path(tmp) / "traces.db")
+        trace = new_run("Original Claude prompt", labels={"source": "claude-code-http-hooks"})
+        first = Step(type="custom", name="User prompt", input="Original Claude prompt", replayable=True)
+        first.complete()
+        second = Step(type="custom", name="User prompt", input="Latest Claude prompt", replayable=True)
+        second.complete()
+        trace.add_step(first)
+        trace.add_step(second)
+
+        store.upsert_trace(trace)
+        rows = store.list_traces()
+        loaded = store.get_trace(trace.run.id)
+
+    assert rows[0].task == "Latest Claude prompt"
+    assert loaded.run.task == "Latest Claude prompt"
+
+
 def test_trace_store_roundtrips_full_trace() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         store = TraceStore(Path(tmp) / "traces.db")
@@ -202,7 +249,7 @@ class _FakePostgresConnection:
             row = self.driver.rows.get(str(params[0]))
             return _FakePostgresCursor([{"trace_json": row["trace_json"]}] if row else [])
         if normalized.startswith("select run_id"):
-            rows = sorted(self.driver.rows.values(), key=lambda row: (str(row["started_at"]), str(row["run_id"])), reverse=True)
+            rows = sorted(self.driver.rows.values(), key=lambda row: (str(row["imported_at"]), str(row["run_id"])), reverse=True)
             return _FakePostgresCursor(rows[: int(params[-1])])
         return _FakePostgresCursor([])
 

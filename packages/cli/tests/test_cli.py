@@ -12,11 +12,14 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.request import Request, urlopen
 
 import pytest
 
 import agent_devtools_cli.main as cli_main
-from agent_devtools import Cost, Error, Step, ToolCall, Trace, TraceContext, new_run
+from agent_devtools import Cost, Error, Step, ToolCall, Trace, TraceContext, TraceStore, new_run
+from agent_devtools.local import initialize_workspace
+from agent_devtools.local_api import create_server
 from agent_devtools_cli.main import (
     build_parser,
     command_cost,
@@ -160,11 +163,21 @@ class _CaptureServer:
 
 
 class TestParser:
+    def test_cli_prefers_workspace_python_sdk(self) -> None:
+        sdk_path = Path(cli_main.__file__).resolve().parents[2] / "python-sdk"
+        sdk_index = cli_main.sys.path.index(str(sdk_path))
+        site_package_indexes = [index for index, path in enumerate(cli_main.sys.path) if "site-packages" in path]
+        assert not site_package_indexes or sdk_index < min(site_package_indexes)
+
     def test_parser_has_all_commands(self) -> None:
         parser = build_parser()
         choices = list(parser._subparsers._group_actions[0].choices.keys())
-        for cmd in ["list", "show", "steps", "inspect", "cost", "diff", "replay", "replay-adapter", "replay-compare", "experiment", "regression-check", "redact", "privacy-scan", "otel-export", "otel-push", "store", "init", "doctor", "watch", "mcp", "audit", "mcp-config", "serve", "team-serve"]:
+        for cmd in ["list", "show", "steps", "inspect", "cost", "diff", "replay", "replay-adapter", "replay-claude-code", "replay-compare", "experiment", "regression-check", "redact", "privacy-scan", "otel-export", "otel-push", "store", "init", "doctor", "watch", "mcp", "audit", "mcp-config", "serve", "team-serve"]:
             assert cmd in choices
+
+    def test_serve_uses_windows_safe_default_port(self) -> None:
+        args = build_parser().parse_args(["serve"])
+        assert args.port == 8791
 
     def test_init_and_doctor_create_a_ready_local_workspace(self, capsys) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -464,6 +477,30 @@ class TestReplayCommand:
             assert rc == 0
             assert list(out_dir.glob("*.trace.json"))
 
+    def test_replay_loads_local_trace_by_run_id(self, capsys) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = initialize_workspace(tmp)
+            trace = _make_success_trace()
+            trace.steps[0].replayable = True
+            source_path = _write_trace(tmp, trace, "source.trace.json")
+            TraceStore(workspace.db_path).upsert_trace(trace, source_path=source_path)
+            out_dir = Path(tmp) / "replays"
+
+            rc = main([
+                "replay",
+                "--run-id",
+                trace.run.id,
+                "--start-step",
+                trace.steps[0].id,
+                "--root",
+                tmp,
+                "--output-dir",
+                str(out_dir),
+            ])
+
+            assert rc == 0
+            assert list(out_dir.glob("*.trace.json"))
+
     def test_replay_uses_plan_tool_mocks(self, capsys) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             trace = _make_success_trace()
@@ -540,6 +577,261 @@ class TestReplayCommand:
             assert replay_data["run"]["labels"]["adapter"] == "demo-agent"
             assert replay_data["steps"][0]["input"] == {"question": "weather"}
             assert replay_data["steps"][0]["output"] == {"answer": "WEATHER"}
+
+    def test_replay_claude_code_requires_explicit_execution_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = _make_success_trace()
+            trace.run.labels["source"] = "claude-code-http-hooks"
+            trace.steps[0].name = "User prompt"
+            trace.steps[0].input = "Inspect this project"
+            trace.steps[0].replayable = True
+            path = _write_trace(tmp, trace)
+
+            with pytest.raises(SystemExit, match="--allow-agent-execution"):
+                main([
+                    "replay-claude-code",
+                    str(path),
+                    "--start-step",
+                    trace.steps[0].id,
+                    "--root",
+                    tmp,
+                ])
+
+    def test_replay_claude_code_rejects_non_claude_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = _make_success_trace()
+            trace.steps[0].input = "Inspect this project"
+            trace.steps[0].replayable = True
+            path = _write_trace(tmp, trace)
+
+            with pytest.raises(SystemExit, match="Claude Code HTTP hooks"):
+                main([
+                    "replay-claude-code",
+                    str(path),
+                    "--start-step",
+                    trace.steps[0].id,
+                    "--root",
+                    tmp,
+                    "--allow-agent-execution",
+                ])
+
+    def test_replay_claude_code_rejects_non_replayable_step(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = _make_success_trace()
+            trace.run.labels["source"] = "claude-code-http-hooks"
+            trace.steps[0].name = "Bash"
+            trace.steps[0].input = "Inspect this project"
+            path = _write_trace(tmp, trace)
+
+            with pytest.raises(SystemExit, match="replayable User prompt"):
+                main([
+                    "replay-claude-code",
+                    str(path),
+                    "--start-step",
+                    trace.steps[0].id,
+                    "--root",
+                    tmp,
+                    "--allow-agent-execution",
+                ])
+
+    def test_replay_claude_code_rejects_non_loopback_api(self, monkeypatch) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = _make_success_trace()
+            trace.run.labels["source"] = "claude-code-http-hooks"
+            trace.steps[0].name = "User prompt"
+            trace.steps[0].input = "Inspect this project"
+            trace.steps[0].replayable = True
+            path = _write_trace(tmp, trace)
+            monkeypatch.setattr(cli_main, "urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("network must not be called")))
+
+            with pytest.raises(SystemExit, match="loopback"):
+                main([
+                    "replay-claude-code",
+                    str(path),
+                    "--start-step",
+                    trace.steps[0].id,
+                    "--root",
+                    tmp,
+                    "--api-url",
+                    "https://example.com",
+                    "--allow-agent-execution",
+                ])
+
+    def test_replay_claude_code_executes_registered_session(self, monkeypatch, capsys) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = initialize_workspace(tmp)
+            server = create_server(workspace, port=0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                trace = _make_success_trace()
+                trace.run.labels["source"] = "claude-code-http-hooks"
+                trace.steps[0].name = "User prompt"
+                trace.steps[0].input = "Inspect this project"
+                trace.steps[0].replayable = False
+                source_path = _write_trace(tmp, trace, "source.trace.json")
+                TraceStore(workspace.db_path).upsert_trace(trace, source_path=source_path)
+                base_url = f"http://127.0.0.1:{server.server_port}"
+                executed: list[list[str]] = []
+                executable_name = "claude.cmd" if os.name == "nt" else "claude"
+                fake_executable = Path(tmp) / executable_name
+                fake_executable.write_text("@exit /b 0\n" if os.name == "nt" else "#!/bin/sh\nexit 0\n", encoding="utf-8")
+                if os.name != "nt":
+                    fake_executable.chmod(0o755)
+                monkeypatch.setenv("PATH", f"{tmp}{os.pathsep}{os.environ.get('PATH', '')}")
+
+                def fake_run(command, **kwargs):
+                    executed.append(command)
+                    session_id = command[command.index("--session-id") + 1]
+                    for payload in [
+                        {
+                            "session_id": session_id,
+                            "hook_event_name": "UserPromptSubmit",
+                            "cwd": tmp,
+                            "prompt": "Inspect this project",
+                        },
+                        {
+                            "session_id": session_id,
+                            "hook_event_name": "Stop",
+                            "last_assistant_message": "Inspection complete",
+                        },
+                    ]:
+                        request = Request(
+                            f"{base_url}/api/hooks/claude-code",
+                            data=json.dumps(payload).encode("utf-8"),
+                            headers={"Content-Type": "application/json"},
+                            method="POST",
+                        )
+                        with urlopen(request, timeout=3) as response:
+                            assert response.status == 202
+                    return cli_main.subprocess.CompletedProcess(command, 0, '{"result":"Inspection complete"}', "")
+
+                monkeypatch.setattr(cli_main.subprocess, "run", fake_run)
+
+                rc = main([
+                    "replay-claude-code",
+                    "--run-id",
+                    trace.run.id,
+                    "--start-step",
+                    trace.steps[0].id,
+                    "--root",
+                    tmp,
+                    "--api-url",
+                    base_url,
+                    "--allowed-tool",
+                    "Read",
+                    "--allowed-tool",
+                    "Glob",
+                    "--max-budget-usd",
+                    "0.25",
+                    "--allow-agent-execution",
+                ])
+
+                assert rc == 0
+                assert len(executed) == 1
+                command = executed[0]
+                assert Path(command[0]).resolve() == fake_executable.resolve()
+                assert command[command.index("--permission-mode") + 1] == "plan"
+                assert command[command.index("--allowedTools") + 1] == "Read,Glob"
+                assert command[command.index("--max-budget-usd") + 1] == "0.25"
+                assert command[-2:] == ["--", "Inspect this project"]
+
+                replay_files = list(workspace.trace_dir.glob("claude-code-*.trace.json"))
+                assert len(replay_files) == 1
+                replay = json.loads(replay_files[0].read_text(encoding="utf-8"))
+                assert replay["run"]["labels"]["replay_mode"] == "claude_code_execution"
+                assert replay["run"]["labels"]["source_run_id"] == trace.run.id
+                assert replay["run"]["labels"]["source_start_step_id"] == trace.steps[0].id
+                assert replay["run"]["final_output"] == "Inspection complete"
+                assert "Claude Code replay completed" in capsys.readouterr().out
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+                server.server_close()
+
+    def test_replay_claude_code_finalizes_budget_failure_trace(self, monkeypatch) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = initialize_workspace(tmp)
+            server = create_server(workspace, port=0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                trace = _make_success_trace()
+                trace.run.labels["source"] = "claude-code-http-hooks"
+                trace.steps[0].name = "User prompt"
+                trace.steps[0].input = "Inspect this project"
+                source_path = _write_trace(tmp, trace, "source.trace.json")
+                TraceStore(workspace.db_path).upsert_trace(trace, source_path=source_path)
+                base_url = f"http://127.0.0.1:{server.server_port}"
+                executable_name = "claude.cmd" if os.name == "nt" else "claude"
+                fake_executable = Path(tmp) / executable_name
+                fake_executable.write_text("@exit /b 0\n" if os.name == "nt" else "#!/bin/sh\nexit 0\n", encoding="utf-8")
+                if os.name != "nt":
+                    fake_executable.chmod(0o755)
+                monkeypatch.setenv("PATH", f"{tmp}{os.pathsep}{os.environ.get('PATH', '')}")
+
+                def fake_run(command, **kwargs):
+                    session_id = command[command.index("--session-id") + 1]
+                    for payload in [
+                        {
+                            "session_id": session_id,
+                            "hook_event_name": "UserPromptSubmit",
+                            "prompt": "Inspect this project",
+                        },
+                        {
+                            "session_id": session_id,
+                            "hook_event_name": "Stop",
+                        },
+                    ]:
+                        request = Request(
+                            f"{base_url}/api/hooks/claude-code",
+                            data=json.dumps(payload).encode("utf-8"),
+                            headers={"Content-Type": "application/json"},
+                            method="POST",
+                        )
+                        with urlopen(request, timeout=3) as response:
+                            assert response.status == 202
+                    result = {
+                        "type": "result",
+                        "subtype": "error_max_budget_usd",
+                        "is_error": True,
+                        "stop_reason": "tool_use",
+                        "session_id": session_id,
+                        "total_cost_usd": 0.397472,
+                        "usage": {"input_tokens": 28785, "output_tokens": 213},
+                    }
+                    return cli_main.subprocess.CompletedProcess(command, 1, json.dumps(result), "")
+
+                monkeypatch.setattr(cli_main.subprocess, "run", fake_run)
+
+                with pytest.raises(SystemExit, match="error_max_budget_usd"):
+                    main([
+                        "replay-claude-code",
+                        "--run-id",
+                        trace.run.id,
+                        "--start-step",
+                        trace.steps[0].id,
+                        "--root",
+                        tmp,
+                        "--api-url",
+                        base_url,
+                        "--max-budget-usd",
+                        "0.25",
+                        "--allow-agent-execution",
+                    ])
+
+                replay_files = list(workspace.trace_dir.glob("claude-code-*.trace.json"))
+                assert len(replay_files) == 1
+                replay = json.loads(replay_files[0].read_text(encoding="utf-8"))
+                assert replay["run"]["status"] == "error"
+                assert replay["run"]["labels"]["claude_result_subtype"] == "error_max_budget_usd"
+                assert replay["run"]["labels"]["partial"] == "true"
+                assert replay["run"]["cost"]["amount_usd"] == 0.397472
+                assert "final_output" not in replay["run"]
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+                server.server_close()
 
     def test_replay_adapter_accepts_input_json_override(self, capsys) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -38,7 +38,19 @@ def test_import_new_traces_skips_unchanged_files(tmp_path: Path) -> None:
     assert len(import_new_traces(config, store)) == 1
     _write_trace(config.trace_dir)
 
-    assert import_new_traces(config, store) == ["local-run"]
+    assert "local-run" in import_new_traces(config, store)
+    assert import_new_traces(config, store) == []
+
+
+def test_import_new_traces_reimports_legacy_fingerprints(tmp_path: Path) -> None:
+    config = initialize_workspace(tmp_path)
+    store = TraceStore(config.db_path, redaction=True)
+    _write_trace(config.trace_dir)
+    trace_path = next(config.trace_dir.glob("local-run-*.trace.json"))
+    stat = trace_path.stat()
+    config.state_path.write_text(json.dumps({trace_path.name: f"v2:{stat.st_mtime_ns}:{stat.st_size}"}), encoding="utf-8")
+
+    assert "local-run" in import_new_traces(config, store)
     assert import_new_traces(config, store) == []
 
 
