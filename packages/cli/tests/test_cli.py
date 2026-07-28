@@ -338,10 +338,14 @@ class TestParser:
             "5176",
         ]
         assert calls[1][1]["env"]["AGENT_DEVTOOLS_API_URL"] == "http://127.0.0.1:8792"
-        assert taskkill_calls == [
-            ["taskkill", "/PID", "1000", "/T", "/F"],
-            ["taskkill", "/PID", "1001", "/T", "/F"],
-        ]
+        if os.name == "nt":
+            assert taskkill_calls == [
+                ["taskkill", "/PID", "1000", "/T", "/F"],
+                ["taskkill", "/PID", "1001", "/T", "/F"],
+            ]
+        else:
+            assert taskkill_calls == []
+            assert all(process.terminated for process in processes)
 
     def test_start_times_out_and_cleans_up_children(self, monkeypatch, tmp_path) -> None:
         web_root = tmp_path / "packages" / "web-ui"
@@ -391,10 +395,14 @@ class TestParser:
             )
 
         assert len(processes) == 2
-        assert taskkill_calls == [
-            ["taskkill", "/PID", "2000", "/T", "/F"],
-            ["taskkill", "/PID", "2001", "/T", "/F"],
-        ]
+        if os.name == "nt":
+            assert taskkill_calls == [
+                ["taskkill", "/PID", "2000", "/T", "/F"],
+                ["taskkill", "/PID", "2001", "/T", "/F"],
+            ]
+        else:
+            assert taskkill_calls == []
+            assert all(process.terminated for process in processes)
 
     @pytest.mark.skipif(os.name != "nt", reason="Windows process-tree cleanup")
     def test_stop_processes_uses_taskkill_for_windows_process_trees(self, monkeypatch) -> None:
@@ -885,6 +893,7 @@ class TestReplayCommand:
             trace.steps[0].input = "Inspect this project"
             trace.steps[0].replayable = True
             path = _write_trace(tmp, trace)
+            monkeypatch.setattr(cli_main.shutil, "which", lambda executable: None)
             monkeypatch.setattr(cli_main, "urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("network must not be called")))
 
             with pytest.raises(SystemExit, match="loopback"):

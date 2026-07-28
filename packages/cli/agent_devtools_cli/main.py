@@ -582,12 +582,12 @@ def command_replay_claude_code(args: argparse.Namespace) -> int:
     prompt = start_step.input
     if not isinstance(prompt, str) or not prompt.strip():
         raise SystemExit("Claude Code replay requires a recorded text prompt at --start-step")
+    api_url = _loopback_api_url(args.api_url)
     claude_executable = shutil.which(args.claude_executable)
     if claude_executable is None:
         raise SystemExit(f"Claude Code executable not found: {args.claude_executable}")
 
     session_id = str(uuid.uuid4())
-    api_url = _loopback_api_url(args.api_url)
     _register_claude_code_replay(api_url, session_id, source, start_step.id)
     command = [
         claude_executable,
